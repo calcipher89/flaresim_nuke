@@ -87,7 +87,7 @@ Same lens (Angenieux 180mm, 15 surfaces, 66 active pairs), same frame, same mach
 | Platform | GPU Backend | Nuke | Status |
 |---|---|---|---|
 | **Linux** | CUDA (sm_70+) | 14–17 | Supported — local or Docker (ASWF) builds |
-| **Windows** | CUDA (sm_70+) | 14–17 | Supported — Ninja + MSVC 2022 |
+| **Windows** | CUDA (sm_70+) | 14–17 | Supported — Ninja + MSVC (VS 2019 toolset), see [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md) |
 | **macOS** | Metal (Apple Silicon) | 15–17 | Supported |
 
 Pre-built plugins are published as zips on the GitHub Releases page, one per Nuke version and OS. They are no longer committed to the repository.
@@ -133,7 +133,7 @@ The build handles these automatically:
 |---|---|---|
 | Linux (local toolchain) | `scripts/build_linux.sh` | `dist/nuke<N>/` |
 | Linux (ASWF Docker, reproducible) | `scripts/build_docker.sh --images` once, then `scripts/build_docker.sh` | `dist/nuke<N>/` |
-| Windows (VS 2022 dev prompt) | `.\scripts\build_windows.ps1` | `dist\nuke<N>\` |
+| Windows (VS 2019 x64 dev prompt) | `.\scripts\build_windows.ps1` | `dist\nuke<N>\` |
 
 Then `scripts/package_release.sh --version 1.0.0` (or `.\scripts\package_release.ps1 -Version 1.0.0`) zips each version into `release_packages/`, ready for a GitHub Release.
 

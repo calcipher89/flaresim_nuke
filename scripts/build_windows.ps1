@@ -1,8 +1,10 @@
 # build_windows.ps1 - Build FlareSim + FlareSim3D for every Nuke install found.
 #
-# Run from a "x64 Native Tools Command Prompt for VS 2022" (or a PowerShell
-# with the VS developer environment loaded) with the CUDA 12.x toolkit
-# installed.  Uses the Ninja generator, which honours the CUDA toolkit on PATH.
+# Run from a "x64 Native Tools Command Prompt for VS 2019" (Nuke's NDK
+# requires the VS 2019 / v142 compiler; on VS 2022 use
+# vcvars64.bat -vcvars_ver=14.29) with the CUDA 12.x toolkit installed.
+# Uses the Ninja generator, which honours the CUDA toolkit on PATH.
+# Full walkthrough: docs/BUILD_WINDOWS.md
 #
 # Usage:
 #   .\scripts\build_windows.ps1
