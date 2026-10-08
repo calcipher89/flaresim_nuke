@@ -84,99 +84,90 @@ Same lens (Angenieux 180mm, 15 surfaces, 66 active pairs), same frame, same mach
 
 ## Platforms
 
-| Platform | GPU Backend | Status |
-|---|---|---|
-| **Linux** | CUDA | Fully supported — pre-built binaries and build-from-source |
-| **macOS** | Metal | Supported — build-from-source |
-| **Windows** | CUDA | Supported — build-from-source (Ninja + MSVC 2022) |
+| Platform | GPU Backend | Nuke | Status |
+|---|---|---|---|
+| **Linux** | CUDA (sm_70+) | 14–17 | Supported — local or Docker (ASWF) builds |
+| **Windows** | CUDA (sm_70+) | 14–17 | Supported — Ninja + MSVC 2022 |
+| **macOS** | Metal (Apple Silicon) | 15–17 | Supported |
+
+Pre-built plugins are published as zips on the GitHub Releases page, one per Nuke version and OS. They are no longer committed to the repository.
+
+---
+
+## Repository Layout
+
+| Path | Contents |
+|---|---|
+| `CMakeLists.txt` | One build for every platform — picks CUDA or Metal automatically |
+| `src/` | Nuke nodes, optics core and CUDA kernels |
+| `src/metal/` | macOS nodes and Metal shaders |
+| `nuke/` | `menu.py` and the dockable Lens Browser panel |
+| `lenses/` | 1,370+ real lens prescriptions and the converter scripts |
+| `scripts/` | Multi-version build and release packaging scripts |
+| `docker/` | ASWF + CUDA build image used by `scripts/build_docker.sh` |
+| `examples/` | Example Nuke script |
 
 ---
 
 ## Building from Source
 
-### Linux
+All platforms use the same root `CMakeLists.txt`:
 
 ```bash
-export PATH=/usr/local/cuda-12.1/bin:$PATH
-export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH
-
-rm -rf build && mkdir build && cd build
-
-cmake .. -DNUKE_VERSION=14.1v8 \
-         -DCMAKE_CUDA_ARCHITECTURES="86;89;90"
-
-make -j$(nproc)
+cmake -S . -B build -DNUKE_VERSION=15.1v10
+cmake --build build --config Release -j
+cmake --install build --prefix ~/.nuke/plugins/FlareSim   # plugins + menu.py + Lens Browser + lenses
 ```
 
-Output: `build/FlareSim.so` + `build/FlareSim3D.so`
+`NUKE_VERSION` is used to find the default install location (`/usr/local/Nuke<ver>`, `C:/Program Files/Nuke<ver>`, or `/Applications/Nuke<ver>/Nuke<ver>.app/Contents/MacOS`). Point at another install with `-DNDK_ROOT=<nuke>/include -DNUKE_LIB_DIR=<nuke>` (or `-DNUKE_ROOT=` on macOS).
 
-Adjust `NUKE_VERSION` and `CMAKE_CUDA_ARCHITECTURES` to match your environment. `NDK_ROOT` and `NUKE_LIB_DIR` default to `/usr/local/Nuke<VERSION>`. CUDA runtime is linked statically — no runtime dependency.
+The build handles these automatically:
 
-### macOS (Metal)
+- **CUDA architectures** are chosen from the installed nvcc (12.8+ adds Blackwell sm_100/sm_120). Override with `-DCMAKE_CUDA_ARCHITECTURES="86;89"`.
+- **libstdc++ ABI**: Nuke 14 on Linux needs `_GLIBCXX_USE_CXX11_ABI=0` (per Foundry's NDK guide); it is set from `NUKE_VERSION`.
+- **CUDA runtime** is linked statically, so users need only an NVIDIA driver ≥ 525.
 
-```bash
-rm -rf build && mkdir build && cd build
+### Building every Nuke version at once
 
-cmake .. -DNUKE_VERSION=14.1v8
-
-make -j$(sysctl -n hw.ncpu)
-```
-
-Output: `build/FlareSim.dylib` + `build/FlareSim3D.dylib`
-
-Metal shaders are compiled at plugin load time. No CUDA required.
-
-### Windows
-
-Requires Visual Studio 2022 Developer Command Prompt and CUDA 12.4 (or any 12.x). Uses Ninja generator — the VS generator ignores `CMAKE_CUDA_COMPILER`.
-
-```cmd
-set PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin;%PATH%
-
-cd C:\path\to\flaresim_nuke
-
-rmdir /s /q build 2>nul & mkdir build && cd build && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DCMAKE_CUDA_COMPILER="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/bin/nvcc.exe" -DNUKE_VERSION=14.1v8 -DCMAKE_CUDA_ARCHITECTURES="86;89;90" && cmake --build .
-```
-
-Output: `build\FlareSim.dll` + `build\FlareSim3D.dll`
-
-CUDA runtime is linked statically — no `cudart64_*.dll` needed at runtime. The plugin only requires an NVIDIA driver ≥ 525 (CUDA 12.4 minimum). Any newer driver (12.8, 12.9, 13.x) works — drivers are forward-compatible.
-
-### CUDA Architecture Reference
-
-| Architecture | GPUs | Min CUDA |
+| Platform | Command | Output |
 |---|---|---|
-| sm_70 | V100, Titan V | 9.0 |
-| sm_75 | RTX 2000, T4 | 10.0 |
-| sm_86 | RTX 3000, A5000/A6000 | 11.1 |
-| sm_89 | RTX 4000 | 11.8 |
-| sm_90 | H100 | 12.0 |
-| sm_100 | RTX 5000, B200 | 12.8 |
+| Linux (local toolchain) | `scripts/build_linux.sh` | `dist/nuke<N>/` |
+| Linux (ASWF Docker, reproducible) | `scripts/build_docker.sh --images` once, then `scripts/build_docker.sh` | `dist/nuke<N>/` |
+| Windows (VS 2022 dev prompt) | `.\scripts\build_windows.ps1` | `dist\nuke<N>\` |
 
-Default: `86;89;90` (covers Ampere through Hopper). Add `100` for Blackwell if your CUDA toolkit supports it.
+Then `scripts/package_release.sh --version 1.0.0` (or `.\scripts\package_release.ps1 -Version 1.0.0`) zips each version into `release_packages/`, ready for a GitHub Release.
+
+### Smoke test (no Nuke or GPU needed)
+
+```bash
+cmake -S . -B build-tests -DFLARESIM_BUILD_PLUGINS=OFF
+cmake --build build-tests && ctest --test-dir build-tests
+```
+
+CI runs this test, compiles the CUDA kernels and checks the Python files on every pull request.
 
 ---
 
 ## Installation
 
-1. Copy `FlareSim.so` (or `.dylib` / `.dll`) and `FlareSim3D.so` to a directory on your `NUKE_PATH`, for example `~/.nuke/plugins/`.
-2. Add to your `menu.py`:
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `menu.py`, `FlareSim_LensBrowser.py` and `lenses/`.
+2. Add this to `~/.nuke/init.py`:
    ```python
-   nuke.menu('Nodes').addCommand('Filter/FlareSim', 'nuke.createNode("FlareSim")')
-   nuke.menu('Nodes').addCommand('Filter/FlareSim3D', 'nuke.createNode("FlareSim3D")')
+   nuke.pluginAddPath('./plugins/FlareSim')
    ```
-3. Copy the `lenses/` folder somewhere accessible and point the **Lens File** knob at a `.lens` file.
-4. Restart Nuke.
+3. Restart Nuke. The nodes appear under **Filter**, and **Pane → FlareSim Lens Browser** opens on the bundled lens library.
 
 ---
 
 ## Quick Start
 
-**FlareSim** (manual source):
+**FlareSim** (2D source):
 1. Connect your plate to the input.
-2. Point **Lens File** at a `.lens` prescription.
+2. Point **Lens File** at a `.lens` prescription, or pick one in the **Lens Browser**.
 3. Set **FOV H** to match your camera.
-4. Set **Source XY** to the light source position, or raise **Threshold** to auto-detect bright highlights.
+4. Choose a **Source Mode**:
+   - **Auto Detect** — every bright area of the plate becomes a flare source. Raise **Threshold** until only the lights you want are flaring, and use **Max Sources** to cap how many are traced.
+   - **Manual XY** — one source at **Source XY** (animate it or link it to a Tracker).
 5. Adjust **Flare Gain** to taste.
 
 **FlareSim3D** (3D source):

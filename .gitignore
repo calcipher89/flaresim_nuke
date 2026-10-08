@@ -1,0 +1,22 @@
+# Build outputs — plugins are published as GitHub Release assets, not committed
+build/
+build_*/
+dist/
+release_packages/
+*.so
+*.dylib
+*.dll
+*.lib
+*.exp
+*.obj
+*.o
+*.pdb
+*.ilk
+*.metallib
+*.air
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.Identifier

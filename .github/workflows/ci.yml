@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # CPU-only optics checks — no Nuke, CUDA or Metal needed.
+  smoke-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DFLARESIM_BUILD_PLUGINS=OFF
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # Compile the CUDA kernels on their own.  The Nuke node sources need the
+  # proprietary NDK, so they are built locally with scripts/build_*.
+  cuda-compile:
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:12.8.1-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile kernels
+        run: |
+          for f in src/ghost_cuda.cu src/blur_cuda.cu; do
+            nvcc -std=c++17 --expt-relaxed-constexpr -Xcompiler -fPIC \
+                 -gencode arch=compute_70,code=sm_70 \
+                 -gencode arch=compute_86,code=sm_86 \
+                 -gencode arch=compute_120,code=sm_120 \
+                 -Isrc -c "$f" -o "/tmp/$(basename "$f").o"
+          done
+
+  python-syntax:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Nuke Python files
+        run: python3 -m py_compile nuke/*.py lenses/*.py
