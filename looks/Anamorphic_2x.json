@@ -1,0 +1,22 @@
+{
+  "flaresim_look_version": 1,
+  "name": "Anamorphic 2x",
+  "description": "2x anamorphic test lens. Stretched ghosts along the horizontal. Starting point, tune to taste.",
+  "lens": "Anamorphic_Test_50mm_2x.lens",
+  "knobs": {
+    "flare_gain": 10.0,
+    "ray_grid": 64,
+    "pupil_jitter": 0,
+    "aperture_blades": 0,
+    "aperture_rotation": 0.0,
+    "spectral_samples": 2,
+    "spectral_jitter": true,
+    "spectral_jitter_scale": 1.0,
+    "highlight_compress": false,
+    "highlight_metric": 1,
+    "highlight_clip": 2.0,
+    "highlight_knee": 0.5,
+    "ghost_blur": 0.003,
+    "ghost_blur_passes": 3
+  }
+}
