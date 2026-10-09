@@ -305,7 +305,9 @@ endforeach()
 install(TARGETS ${FLARESIM_TARGETS}
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
-install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py DESTINATION .)
+install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py nuke/FlareSim_Looks.py DESTINATION .)
+install(DIRECTORY looks/ DESTINATION looks
+    FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY lenses/ DESTINATION lenses
     FILES_MATCHING PATTERN "*.lens")
 

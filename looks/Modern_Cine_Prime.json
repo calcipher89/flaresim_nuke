@@ -1,0 +1,22 @@
+{
+  "flaresim_look_version": 1,
+  "name": "Modern Cine Prime",
+  "description": "Clean, well-coated cinema prime with a 9-blade iris. Subtle ghosts, crisp shapes. Starting point, tune to taste.",
+  "lens": "lens_files/Zeiss_50mm_F1.3_(Arri_Zeiss_Master_Prime_T1.3_50mm).lens",
+  "knobs": {
+    "flare_gain": 6.0,
+    "ray_grid": 64,
+    "pupil_jitter": 0,
+    "aperture_blades": 9,
+    "aperture_rotation": 0.0,
+    "spectral_samples": 2,
+    "spectral_jitter": true,
+    "spectral_jitter_scale": 1.0,
+    "highlight_compress": true,
+    "highlight_metric": 1,
+    "highlight_clip": 2.0,
+    "highlight_knee": 0.5,
+    "ghost_blur": 0.002,
+    "ghost_blur_passes": 3
+  }
+}

@@ -1,5 +1,5 @@
 """
-FlareSim_LensBrowser.py — Dockable lens file browser panel for FlareSim.
+FlareSim_LensBrowser.py — Dockable lens and look browser panel for FlareSim.
 
 Place this file in the same directory as FlareSim.dll on your NUKE_PATH.
 Open the panel from the Pane menu: "FlareSim Lens Browser".
@@ -7,12 +7,16 @@ Open the panel from the Pane menu: "FlareSim Lens Browser".
 
 import os
 import re
+import subprocess
+import sys
 import nuke
 import nukescripts
 
+import FlareSim_Looks
+
 
 # Node classes that carry a lens_file knob.
-FLARESIM_CLASSES = ('FlareSim', 'FlareSim3D')
+FLARESIM_CLASSES = FlareSim_Looks.FLARESIM_CLASSES
 
 # Lens library shipped next to this file in release packages.
 _BUNDLED_LENS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -98,6 +102,30 @@ class FlareLensBrowser(nukescripts.PythonPanel):
             'it is used automatically.'
         )
 
+        # --- Looks ---
+        self._looks_div = nuke.Text_Knob('looks_div', 'Looks', '')
+        self._look_list_knob = nuke.Enumeration_Knob('look_list', 'Look', ['(no looks found)'])
+        self._look_list_knob.setTooltip(
+            'Saved looks: a lens plus gain, aperture, spectral, blur and '
+            'per-surface settings.  Source position, threshold and camera '
+            'are not part of a look.'
+        )
+        self._look_refresh_knob = nuke.Script_Knob('look_refresh', 'Refresh')
+        self._look_refresh_knob.clearFlag(nuke.STARTLINE)
+        self._look_info_knob = nuke.Text_Knob('look_info', '', '')
+        self._apply_look_knob = nuke.Script_Knob('apply_look', 'Apply Look to selected FlareSim')
+        self._apply_look_knob.setTooltip(
+            'Sets the lens and look settings on the selected FlareSim / '
+            'FlareSim3D node(s).  Undo with Ctrl+Z.'
+        )
+        self._save_look_knob = nuke.Script_Knob('save_look', 'Save Look...')
+        self._save_look_knob.setTooltip(
+            "Saves the selected FlareSim node's lens and look settings as a "
+            'new look in your own looks folder.'
+        )
+        self._open_looks_knob = nuke.Script_Knob('open_looks', 'Open My Looks Folder')
+        self._open_looks_knob.clearFlag(nuke.STARTLINE)
+
         for k in (
             self._dir_knob,
             self._browse_knob,
@@ -105,8 +133,18 @@ class FlareLensBrowser(nukescripts.PythonPanel):
             self._refresh_knob,
             self._list_knob,
             self._load_knob,
+            self._looks_div,
+            self._look_list_knob,
+            self._look_refresh_knob,
+            self._look_info_knob,
+            self._apply_look_knob,
+            self._save_look_knob,
+            self._open_looks_knob,
         ):
             self.addKnob(k)
+
+        # label → look dict, kept in sync with the look Enumeration_Knob values
+        self._look_map = {}
 
         # label → absolute path, kept in sync with the Enumeration_Knob values
         self._path_map = {}
@@ -115,6 +153,8 @@ class FlareLensBrowser(nukescripts.PythonPanel):
         if os.path.isdir(_BUNDLED_LENS_DIR):
             self._dir_knob.setValue(_BUNDLED_LENS_DIR.replace('\\', '/'))
             self._refresh_list()
+
+        self._refresh_looks()
 
     # ------------------------------------------------------------------
     # Event handler
@@ -136,6 +176,21 @@ class FlareLensBrowser(nukescripts.PythonPanel):
 
         elif knob is self._load_knob:
             self._load_selected()
+
+        elif knob is self._look_refresh_knob:
+            self._refresh_looks()
+
+        elif knob is self._look_list_knob:
+            self._show_look_info()
+
+        elif knob is self._apply_look_knob:
+            self._apply_selected_look()
+
+        elif knob is self._save_look_knob:
+            self._save_look()
+
+        elif knob is self._open_looks_knob:
+            self._open_looks_folder()
 
     # ------------------------------------------------------------------
     # List refresh
@@ -200,24 +255,95 @@ class FlareLensBrowser(nukescripts.PythonPanel):
             nuke.message('No lens selected, or list needs refreshing.')
             return
 
-        nodes = [n for n in nuke.selectedNodes() if n.Class() in FLARESIM_CLASSES]
+        nodes = FlareSim_Looks.target_nodes()
         if not nodes:
-            all_fs = [n for n in nuke.allNodes() if n.Class() in FLARESIM_CLASSES]
-            if len(all_fs) == 1:
-                nodes = all_fs
-            elif len(all_fs) > 1:
-                nuke.message(
-                    'Multiple FlareSim nodes exist but none are selected.\n'
-                    'Select the node(s) you want to update and try again.'
-                )
-                return
-            else:
-                nuke.message('No FlareSim node found in the script.')
-                return
+            return
 
         fpath_nuke = fpath.replace('\\', '/')
         for n in nodes:
             n['lens_file'].setValue(fpath_nuke)
+
+    # ------------------------------------------------------------------
+    # Looks
+    # ------------------------------------------------------------------
+
+    def _refresh_looks(self, select_name=None):
+        current = select_name or self._look_list_knob.value()
+        looks = FlareSim_Looks.list_looks()
+        self._look_map = {}
+        labels = []
+        for look in looks:
+            label = '%s  (%s)' % (look['name'], look['_source'])
+            self._look_map[label] = look
+            labels.append(label)
+        if not labels:
+            self._look_list_knob.setValues(['(no looks found)'])
+            self._look_info_knob.setValue('')
+            return
+        self._look_list_knob.setValues(labels)
+        for label in labels:
+            if label == current or self._look_map[label]['name'] == current:
+                self._look_list_knob.setValue(label)
+                break
+        self._show_look_info()
+
+    def _show_look_info(self):
+        look = self._look_map.get(self._look_list_knob.value())
+        if not look:
+            self._look_info_knob.setValue('')
+            return
+        lens = look.get('lens', '')
+        lens_name = os.path.splitext(os.path.basename(lens))[0] if lens else '(no lens)'
+        lines = ['Lens: %s' % lens_name]
+        if look.get('description'):
+            lines.append(look['description'])
+        self._look_info_knob.setValue('\n'.join(lines))
+
+    def _apply_selected_look(self):
+        look = self._look_map.get(self._look_list_knob.value())
+        if not look:
+            nuke.message('No look selected, or the list needs refreshing.')
+            return
+        nodes = FlareSim_Looks.target_nodes()
+        if not nodes:
+            return
+        warnings = FlareSim_Looks.apply_look(look, nodes)
+        if warnings:
+            nuke.message('Look applied with warnings:\n' + '\n'.join(warnings))
+
+    def _save_look(self):
+        nodes = FlareSim_Looks.target_nodes()
+        if not nodes:
+            return
+        if len(nodes) > 1:
+            nuke.message('Select just one FlareSim node to save its look.')
+            return
+        node = nodes[0]
+        lens = node['lens_file'].value()
+        default = os.path.splitext(os.path.basename(lens))[0] if lens else 'My Look'
+        name = nuke.getInput('Look name', default)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        description = nuke.getInput('Description (optional)', '') or ''
+        try:
+            FlareSim_Looks.save_look(node, name, description.strip())
+        except FileExistsError:
+            if not nuke.ask('A look called "%s" already exists in your looks '
+                            'folder.  Replace it?' % name):
+                return
+            FlareSim_Looks.save_look(node, name, description.strip(), overwrite=True)
+        self._refresh_looks(select_name=name)
+
+    def _open_looks_folder(self):
+        folder = FlareSim_Looks.USER_LOOKS_DIR
+        os.makedirs(folder, exist_ok=True)
+        if sys.platform.startswith('win'):
+            os.startfile(folder)
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', folder])
+        else:
+            subprocess.Popen(['xdg-open', folder])
 
 
 # ---------------------------------------------------------------------------

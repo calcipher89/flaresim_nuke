@@ -103,6 +103,7 @@ Pre-built plugins are published as zips on the GitHub Releases page, one per Nuk
 | `src/metal/` | macOS nodes and Metal shaders |
 | `nuke/` | `menu.py` and the dockable Lens Browser panel |
 | `lenses/` | 1,370+ real lens prescriptions and the converter scripts |
+| `looks/` | Starter looks (lens + flare settings) shown in the Lens Browser |
 | `scripts/` | Multi-version build and release packaging scripts |
 | `docker/` | ASWF + CUDA build image used by `scripts/build_docker.sh` |
 | `examples/` | Example Nuke script |
@@ -116,7 +117,7 @@ All platforms use the same root `CMakeLists.txt`:
 ```bash
 cmake -S . -B build -DNUKE_VERSION=15.1v10
 cmake --build build --config Release -j
-cmake --install build --prefix ~/.nuke/plugins/FlareSim   # plugins + menu.py + Lens Browser + lenses
+cmake --install build --prefix ~/.nuke/plugins/FlareSim   # plugins + menu.py + Lens Browser + looks + lenses
 ```
 
 `NUKE_VERSION` is used to find the default install location (`/usr/local/Nuke<ver>`, `C:/Program Files/Nuke<ver>`, or `/Applications/Nuke<ver>/Nuke<ver>.app/Contents/MacOS`). Point at another install with `-DNDK_ROOT=<nuke>/include -DNUKE_LIB_DIR=<nuke>` (or `-DNUKE_ROOT=` on macOS).
@@ -150,7 +151,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ## Installation
 
-1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `menu.py`, `FlareSim_LensBrowser.py` and `lenses/`.
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `looks/` and `lenses/`.
 2. Add this to `~/.nuke/init.py`:
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
@@ -181,6 +182,17 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 3. The flare tracks the Axis through the Camera automatically.
 4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
 5. Enable **Outside Source** so the flare persists when the source leaves the frame.
+
+### Looks
+
+A look is a lens plus the settings that shape its flare: Flare Gain, aperture, spectral, highlight, ghost blur and any per-surface overrides. Source position, threshold and camera are not part of a look, so it works on any shot.
+
+In the **Lens Browser** panel:
+- Pick a look under **Looks** and click **Apply Look to selected FlareSim**. Ctrl+Z undoes it.
+- Tune a node, then click **Save Look...** to keep it. Your looks go in `~/.nuke/FlareSim/looks/`.
+- Set `FLARESIM_LOOKS_PATH` to one or more shared folders to give a whole team the same looks.
+
+FlareSim ships a few starter looks in `looks/` as starting points.
 
 ---
 

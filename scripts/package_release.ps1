@@ -32,7 +32,8 @@ foreach ($nv in $NukeVersions) {
     New-Item -ItemType Directory -Force -Path (Join-Path $pkg "lenses") | Out-Null
 
     Copy-Item (Join-Path $src "FlareSim.dll"), (Join-Path $src "FlareSim3D.dll") $pkg
-    Copy-Item (Join-Path $repoDir "nuke\menu.py"), (Join-Path $repoDir "nuke\FlareSim_LensBrowser.py") $pkg
+    Copy-Item (Join-Path $repoDir "nuke\menu.py"), (Join-Path $repoDir "nuke\FlareSim_LensBrowser.py"), (Join-Path $repoDir "nuke\FlareSim_Looks.py") $pkg
+    Copy-Item (Join-Path $repoDir "looks") $pkg -Recurse
     Copy-Item (Join-Path $repoDir "lenses\lens_files") (Join-Path $pkg "lenses") -Recurse
     Copy-Item (Join-Path $repoDir "lenses\*.lens"), (Join-Path $repoDir "lenses\convert_*.py") (Join-Path $pkg "lenses")
     Copy-Item (Join-Path $repoDir "LICENSE") $pkg
