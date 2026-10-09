@@ -231,6 +231,22 @@ def write_look(look, folder=None, overwrite=False):
     return path
 
 
+def can_delete(look):
+    """Only your own looks can be deleted; studio and starter looks are
+    shared or shipped with FlareSim."""
+    path = look.get('_path', '')
+    return bool(path) and os.path.normcase(os.path.dirname(os.path.abspath(path))) == \
+        os.path.normcase(os.path.abspath(USER_LOOKS_DIR))
+
+
+def delete_look(look):
+    """Delete one of your own looks from disk.  Raises ValueError for a
+    studio or starter look, OSError when the file cannot be removed."""
+    if not can_delete(look):
+        raise ValueError('Only your own looks can be deleted: %s' % look.get('name', ''))
+    os.remove(look['_path'])
+
+
 def save_look(node, name, description='', folder=None, overwrite=False):
     """Save the node's look to folder (default: your own looks folder).
 
