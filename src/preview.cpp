@@ -121,6 +121,10 @@ struct Preview
     float                  pairs_shw = -1.0f;
     float                  pairs_shh = -1.0f;
 
+    std::vector<FspSurface> surfs;        // per-surface settings, may be short
+    int                     hl_a = -1, hl_b = -1;   // highlighted ghost(s)
+    int                     enabled_pairs = 0;      // pairs drawn by the last render
+
     std::vector<Canvas> canvases;         // one per render thread
 
     std::vector<float> r, g, b, tmp;      // current pass
@@ -208,30 +212,155 @@ std::vector<PupilSample> pupil_grid(int n, int blades, float rot_deg, uint32_t s
     return out;
 }
 
-// CPU ghost render: the same ray setup as the node's CUDA kernel, with the
-// three classic wavelengths.  Rays on neighbouring pupil grid points form a
-// mesh on the sensor and each cell's energy is spread over its area, so a
-// defocused ghost comes out as a smooth disc instead of a cloud of dots,
-// even with a small ray grid.  Pairs are split across threads.
-void render_cpu(Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
-                float shw, float shh, int w, int h)
+// How one ghost looks after the per-surface settings of its two surfaces.
+struct PairStyle
 {
-    const int n = cfg.ray_grid;
-    const auto grid = pupil_grid(n, cfg.aperture_blades, cfg.aperture_rotation_deg,
-                                 (uint32_t)cfg.pupil_jitter_seed * 1000003u);
+    bool  on = true;
+    float gain = 1.0f;
+    float col[3] = { 1.0f, 1.0f, 1.0f };
+    float ox = 0.0f, oy = 0.0f;           // fraction of the image width
+    float scale = 1.0f;
+};
+
+PairStyle pair_style(const Preview& pv, const GhostPair& pair)
+{
+    PairStyle st;
+    for (int s : { pair.surf_a, pair.surf_b })
+    {
+        if (s < 0 || s >= (int)pv.surfs.size()) continue;
+        const FspSurface& f = pv.surfs[s];
+        st.on     = st.on && f.enabled;
+        st.gain  *= std::max(f.gain, 0.0f);
+        st.col[0] *= std::max(f.r, 0.0f);
+        st.col[1] *= std::max(f.g, 0.0f);
+        st.col[2] *= std::max(f.b, 0.0f);
+        st.ox    += f.offset_x;
+        st.oy    += f.offset_y;
+        st.scale *= f.scale;
+    }
+    return st;
+}
+
+// Brightness of ghosts left out of the highlight.
+constexpr float kDimmed = 0.12f;
+
+bool highlighted(const Preview& pv, const GhostPair& pair)
+{
+    if (pv.hl_a < 0) return true;
+    if (pv.hl_b < 0) return pair.surf_a == pv.hl_a || pair.surf_b == pv.hl_a;
+    return (pair.surf_a == pv.hl_a && pair.surf_b == pv.hl_b) ||
+           (pair.surf_a == pv.hl_b && pair.surf_b == pv.hl_a);
+}
+
+// Everything a ghost trace needs that is the same for every pair.
+struct TraceSetup
+{
+    std::vector<PupilSample> grid;
+    int   n = 0;
+    float ray_weight = 0.0f;
+    float front_R = 0.0f, start_z = 0.0f;
+    Vec3f dir;
+    float lambdas[3];
+    float colour[3];
+    float shw = 0.0f, shh = 0.0f;
+    int   w = 0, h = 0;
+};
+
+bool make_setup(const Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
+                float shw, float shh, int w, int h, TraceSetup& ts)
+{
+    ts.n    = cfg.ray_grid;
+    ts.grid = pupil_grid(ts.n, cfg.aperture_blades, cfg.aperture_rotation_deg,
+                         (uint32_t)cfg.pupil_jitter_seed * 1000003u);
     int n_inside = 0;
-    for (const auto& s : grid) n_inside += s.inside;
-    if (!n_inside) return;
-    const float ray_weight = 1.0f / n_inside;
-    const float front_R    = pv.lens.surfaces[0].semi_aperture;
-    const float start_z    = pv.lens.surfaces[0].z - 20.0f;
+    for (const auto& s : ts.grid) n_inside += s.inside;
+    if (!n_inside) return false;
+    ts.ray_weight = 1.0f / n_inside;
+    ts.front_R    = pv.lens.surfaces[0].semi_aperture;
+    ts.start_z    = pv.lens.surfaces[0].z - 20.0f;
 
     float bx = std::tan(src.angle_x), by = std::tan(src.angle_y);
     const float inv = 1.0f / std::sqrt(bx * bx + by * by + 1.0f);
-    const Vec3f dir(bx * inv, by * inv, inv);
+    ts.dir = Vec3f(bx * inv, by * inv, inv);
+    for (int c = 0; c < 3; ++c) ts.lambdas[c] = cfg.wavelengths[c];
+    ts.colour[0] = src.r; ts.colour[1] = src.g; ts.colour[2] = src.b;
+    ts.shw = shw; ts.shh = shh; ts.w = w; ts.h = h;
+    return true;
+}
 
-    const float lambdas[3] = { cfg.wavelengths[0], cfg.wavelengths[1], cfg.wavelengths[2] };
-    const float colour[3]  = { src.r, src.g, src.b };
+// Trace one ghost at one wavelength and build its mesh: rays on
+// neighbouring pupil grid points form triangles on the sensor.  Each grid
+// cell carries one ray's worth of energy, split over its two triangles; a
+// cell with a corner missing (iris edge, vignetting) keeps the triangle it
+// still has.  Returns the longest edge a triangle may have before it counts
+// as spanning a discontinuity (a fold or a clipped edge), or 0 when no
+// triangle was made.
+float trace_mesh(const Preview& pv, const TraceSetup& ts, const GhostPair& pair, int c,
+                 float value_scale, const PairStyle& st,
+                 std::vector<Hit>& hits, std::vector<Tri>& tris, std::vector<float>& edges)
+{
+    const int n = ts.n;
+    const float cx = ts.w * 0.5f, cy = ts.h * 0.5f;
+    hits.resize(ts.grid.size());
+    for (size_t k = 0; k < ts.grid.size(); ++k)
+    {
+        Hit& hit = hits[k];
+        hit.ok = false;
+        if (!ts.grid[k].inside) continue;
+        Ray ray;
+        ray.origin = Vec3f(ts.grid[k].u * ts.front_R, ts.grid[k].v * ts.front_R, ts.start_z);
+        ray.dir    = ts.dir;
+        const TraceResult tr = trace_ghost_ray(ray, pv.lens, pair.surf_a, pair.surf_b,
+                                               ts.lambdas[c]);
+        if (!tr.valid) continue;
+        const float px = (tr.position.x / (2.0f * ts.shw) + 0.5f) * ts.w;
+        const float py = (tr.position.y / (2.0f * ts.shh) + 0.5f) * ts.h;
+        // Same per-pair transform as the node: scale about the frame
+        // centre, then offset.
+        hit.x = cx + (px - cx) * st.scale + st.ox * ts.w;
+        hit.y = cy + (py - cy) * st.scale + st.oy * ts.w;
+        hit.v = tr.weight * value_scale;
+        hit.ok = std::isfinite(hit.x) && std::isfinite(hit.y) &&
+                 std::fabs(hit.x) < 1e5f && std::fabs(hit.y) < 1e5f &&
+                 hit.v > 1e-14f;
+    }
+    tris.clear();
+    for (int j = 0; j + 1 < n; ++j)
+        for (int i = 0; i + 1 < n; ++i)
+        {
+            const int k = j * n + i;
+            if (hits[k].ok && hits[k + 1].ok && hits[k + n + 1].ok)
+                tris.push_back({ k, k + 1, k + n + 1 });
+            if (hits[k].ok && hits[k + n + 1].ok && hits[k + n].ok)
+                tris.push_back({ k, k + n + 1, k + n });
+        }
+    if (tris.empty()) return 0.0f;
+    edges.resize(tris.size());
+    for (size_t ti = 0; ti < tris.size(); ++ti)
+        edges[ti] = longest_edge(hits[tris[ti].a], hits[tris[ti].b], hits[tris[ti].c]);
+    std::vector<float> sorted_edges(edges);
+    std::nth_element(sorted_edges.begin(), sorted_edges.begin() + sorted_edges.size() / 2,
+                     sorted_edges.end());
+    return std::max(4.0f, kMaxStretch * sorted_edges[sorted_edges.size() / 2]);
+}
+
+// CPU ghost render: the same ray setup as the node's CUDA kernel, with the
+// three classic wavelengths.  Each ghost's mesh is filled, so a defocused
+// ghost comes out as a smooth disc instead of a cloud of dots, even with a
+// small ray grid.  Pairs are split across threads.
+void render_cpu(Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
+                float shw, float shh, int w, int h)
+{
+    TraceSetup ts;
+    if (!make_setup(pv, src, cfg, shw, shh, w, h, ts)) return;
+
+    std::vector<PairStyle> styles(pv.pairs.size());
+    pv.enabled_pairs = 0;
+    for (size_t pi = 0; pi < pv.pairs.size(); ++pi)
+    {
+        styles[pi] = pair_style(pv, pv.pairs[pi]);
+        pv.enabled_pairs += styles[pi].on;
+    }
 
     const int n_threads = std::max(1, std::min({ (int)std::thread::hardware_concurrency(),
                                                  (int)pv.pairs.size(), kMaxThreads }));
@@ -241,61 +370,24 @@ void render_cpu(Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
     {
         Canvas& cv = pv.canvases[t];
         cv.reset(w, h);
-        std::vector<Hit> hits(grid.size());
+        std::vector<Hit> hits;
         std::vector<Tri> tris;
         std::vector<float> edges;
         for (size_t pi = t; pi < pv.pairs.size(); pi += n_threads)
         {
-            const GhostPair& pair = pv.pairs[pi];
-            const float scale = ray_weight * cfg.gain * pv.boosts[pi];
+            const PairStyle& st = styles[pi];
+            if (!st.on || st.gain <= 0.0f) continue;
+            const float scale = ts.ray_weight * cfg.gain * pv.boosts[pi] * st.gain *
+                                (highlighted(pv, pv.pairs[pi]) ? 1.0f : kDimmed);
             for (int c = 0; c < 3; ++c)
             {
-                if (colour[c] <= 0.0f) continue;
-                for (size_t k = 0; k < grid.size(); ++k)
-                {
-                    Hit& hit = hits[k];
-                    hit.ok = false;
-                    if (!grid[k].inside) continue;
-                    Ray ray;
-                    ray.origin = Vec3f(grid[k].u * front_R, grid[k].v * front_R, start_z);
-                    ray.dir    = dir;
-                    const TraceResult tr = trace_ghost_ray(ray, pv.lens, pair.surf_a,
-                                                           pair.surf_b, lambdas[c]);
-                    if (!tr.valid) continue;
-                    hit.x = (tr.position.x / (2.0f * shw) + 0.5f) * w;
-                    hit.y = (tr.position.y / (2.0f * shh) + 0.5f) * h;
-                    hit.v = tr.weight * scale * colour[c];
-                    hit.ok = std::isfinite(hit.x) && std::isfinite(hit.y) &&
-                             std::fabs(hit.x) < 1e5f && std::fabs(hit.y) < 1e5f &&
-                             hit.v > 1e-14f;
-                }
-                // Each grid cell carries one ray's worth of energy, split
-                // over its two triangles.  A cell with a corner missing (iris
-                // edge, vignetting) keeps the triangle it still has.  Cells
-                // stretched far beyond the ghost's typical cell size span a
-                // discontinuity in the mapping (a fold or a clipped edge) and
-                // would smear a streak across the frame, so their energy goes
-                // to their corners instead.
-                tris.clear();
-                for (int j = 0; j + 1 < n; ++j)
-                    for (int i = 0; i + 1 < n; ++i)
-                    {
-                        const int k = j * n + i;
-                        if (hits[k].ok && hits[k + 1].ok && hits[k + n + 1].ok)
-                            tris.push_back({ k, k + 1, k + n + 1 });
-                        if (hits[k].ok && hits[k + n + 1].ok && hits[k + n].ok)
-                            tris.push_back({ k, k + n + 1, k + n });
-                    }
-                if (tris.empty()) continue;
-                edges.resize(tris.size());
-                for (size_t ti = 0; ti < tris.size(); ++ti)
-                    edges[ti] = longest_edge(hits[tris[ti].a], hits[tris[ti].b],
-                                             hits[tris[ti].c]);
-                std::vector<float> sorted_edges(edges);
-                std::nth_element(sorted_edges.begin(),
-                                 sorted_edges.begin() + sorted_edges.size() / 2,
-                                 sorted_edges.end());
-                const float max_edge = std::max(4.0f, kMaxStretch * sorted_edges[sorted_edges.size() / 2]);
+                const float colour = ts.colour[c] * st.col[c];
+                if (colour <= 0.0f) continue;
+                const float max_edge = trace_mesh(pv, ts, pv.pairs[pi], c, scale * colour,
+                                                  st, hits, tris, edges);
+                if (max_edge <= 0.0f) continue;
+                // Stretched triangles would smear a streak across the
+                // frame, so their energy goes to their corners instead.
                 for (size_t ti = 0; ti < tris.size(); ++ti)
                 {
                     const Hit& a = hits[tris[ti].a];
@@ -332,6 +424,135 @@ void render_cpu(Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
     }
 }
 
+inline bool in_triangle(const Hit& a, const Hit& b, const Hit& d, float px, float py)
+{
+    const float area2 = (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x);
+    const float sgn = area2 > 0.0f ? 1.0f : -1.0f;
+    const float e0 = sgn * ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x));
+    const float e1 = sgn * ((d.x - b.x) * (py - b.y) - (d.y - b.y) * (px - b.x));
+    const float e2 = sgn * ((a.x - d.x) * (py - d.y) - (a.y - d.y) * (px - d.x));
+    return e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f;
+}
+
+// Average brightness each ghost puts into a small disc around (qx, qy)
+// (y-up pixels), using the same meshes as render_cpu.
+std::vector<float> ghost_light_at(const Preview& pv, const TraceSetup& ts,
+                                  const GhostConfig& cfg, float qx, float qy, float radius)
+{
+    std::vector<float> light(pv.pairs.size(), 0.0f);
+    // Sample points on a 5 x 5 grid inside the disc.
+    std::vector<std::pair<float, float>> pts;
+    for (int j = -2; j <= 2; ++j)
+        for (int i = -2; i <= 2; ++i)
+            if (i * i + j * j <= 5)
+                pts.push_back({ qx + i * radius / 2.0f, qy + j * radius / 2.0f });
+    const float disc_area = (float)M_PI * radius * radius;
+    const float r2 = radius * radius;
+    auto in_disc = [&](float x, float y) {
+        return (x - qx) * (x - qx) + (y - qy) * (y - qy) <= r2;
+    };
+
+    std::vector<Hit> hits;
+    std::vector<Tri> tris;
+    std::vector<float> edges;
+    for (size_t pi = 0; pi < pv.pairs.size(); ++pi)
+    {
+        const PairStyle st = pair_style(pv, pv.pairs[pi]);
+        if (!st.on || st.gain <= 0.0f) continue;
+        const float scale = ts.ray_weight * cfg.gain * pv.boosts[pi] * st.gain;
+        for (int c = 0; c < 3; ++c)
+        {
+            const float colour = ts.colour[c] * st.col[c];
+            if (colour <= 0.0f) continue;
+            const float max_edge = trace_mesh(pv, ts, pv.pairs[pi], c, scale * colour,
+                                              st, hits, tris, edges);
+            if (max_edge <= 0.0f) continue;
+            float sum = 0.0f;
+            for (size_t ti = 0; ti < tris.size(); ++ti)
+            {
+                const Hit& a = hits[tris[ti].a];
+                const Hit& b = hits[tris[ti].b];
+                const Hit& d = hits[tris[ti].c];
+                const float e = (a.v + b.v + d.v) / 6.0f;
+                if (std::max({ a.x, b.x, d.x }) < qx - radius ||
+                    std::min({ a.x, b.x, d.x }) > qx + radius ||
+                    std::max({ a.y, b.y, d.y }) < qy - radius ||
+                    std::min({ a.y, b.y, d.y }) > qy + radius)
+                    continue;
+                const float area = 0.5f * std::fabs((b.x - a.x) * (d.y - a.y) -
+                                                    (b.y - a.y) * (d.x - a.x));
+                if (edges[ti] > max_edge)
+                {
+                    for (const Hit* hp : { &a, &b, &d })
+                        if (in_disc(hp->x, hp->y)) sum += e / 3.0f / disc_area;
+                }
+                else if (area < 2.0f)
+                {
+                    if (in_disc((a.x + b.x + d.x) / 3.0f, (a.y + b.y + d.y) / 3.0f))
+                        sum += e / disc_area;
+                }
+                else
+                {
+                    int inside = 0;
+                    for (const auto& q : pts) inside += in_triangle(a, b, d, q.first, q.second);
+                    sum += e / area * inside / (float)pts.size();
+                }
+            }
+            light[pi] += sum;
+        }
+    }
+    return light;
+}
+
+// Shared by fsp_render and fsp_pick_ghosts: the light source and ghost
+// settings for a render of this size, matching FlareSim::do_compute().
+struct Optics
+{
+    BrightPixel src;
+    GhostConfig cfg;
+    float shw = 0.0f, shh = 0.0f;
+};
+
+Optics make_optics(Preview& pv, const FspParams* p, int w, int h)
+{
+    Optics o;
+    const float fov_h      = std::clamp(p->fov_h_deg, 1.0f, 170.0f) * (float)M_PI / 180.0f;
+    const float tan_half_h = std::tan(fov_h * 0.5f);
+    const float tan_half_v = tan_half_h * (float)h / (float)w;
+
+    // Source position: top-left pixel origin in, y-up optics inside.
+    const float ndc_x = (p->src_x - w * 0.5f) / w;
+    const float ndc_y = ((h - p->src_y) - h * 0.5f) / h;
+    const float si    = std::max(p->source_intensity, 0.0f) * 1000.0f;
+    o.src.angle_x = std::atan(ndc_x * 2.0f * tan_half_h);
+    o.src.angle_y = std::atan(ndc_y * 2.0f * tan_half_v);
+    o.src.r = std::max(p->src_r, 0.0f) * si;
+    o.src.g = std::max(p->src_g, 0.0f) * si;
+    o.src.b = std::max(p->src_b, 0.0f) * si;
+
+    if (!pv.lens_ok) return o;
+    o.shw = pv.lens.focal_length * tan_half_h;
+    o.shh = pv.lens.focal_length * tan_half_v;
+
+    GhostConfig& cfg = o.cfg;
+    cfg.ray_grid              = std::clamp(p->ray_grid, 4, 256);
+    cfg.gain                  = std::max(p->flare_gain, 0.0f) * 1000.0f;
+    cfg.aperture_blades       = p->aperture_blades;
+    cfg.aperture_rotation_deg = p->aperture_rotation;
+    cfg.spectral_jitter       = 1;
+    cfg.spectral_jitter_seed  = p->seed;
+    cfg.pupil_jitter          = 1;   // stratified, so passes average out
+    cfg.pupil_jitter_seed     = p->seed;
+
+    if (o.shw != pv.pairs_shw || o.shh != pv.pairs_shh)
+    {
+        filter_ghost_pairs(pv.lens, o.shw, o.shh, cfg, pv.pairs, pv.boosts);
+        pv.pairs_shw = o.shw;
+        pv.pairs_shh = o.shh;
+    }
+    return o;
+}
+
 inline unsigned char to_srgb8(float v)
 {
     v = std::clamp(v, 0.0f, 1.0f);
@@ -356,6 +577,9 @@ FSP_API int fsp_load_lens(void* handle, const char* path)
     pv.pairs.clear();
     pv.boosts.clear();
     pv.pairs_shw = pv.pairs_shh = -1.0f;
+    pv.surfs.clear();
+    pv.hl_a = pv.hl_b = -1;
+    pv.enabled_pairs = 0;
     pv.lens = LensSystem();
     pv.lens_ok = path && pv.lens.load(path) && !pv.lens.surfaces.empty();
     if (!pv.lens_ok)
@@ -373,7 +597,89 @@ FSP_API int fsp_num_passes(void* handle)
 
 FSP_API int fsp_num_pairs(void* handle)
 {
-    return (int)static_cast<Preview*>(handle)->pairs.size();
+    return static_cast<Preview*>(handle)->enabled_pairs;
+}
+
+FSP_API void fsp_set_surfaces(void* handle, const FspSurface* surfaces, int n)
+{
+    Preview& pv = *static_cast<Preview*>(handle);
+    pv.surfs.assign(surfaces, surfaces + std::max(0, surfaces ? n : 0));
+}
+
+FSP_API void fsp_set_highlight(void* handle, int surf_a, int surf_b)
+{
+    Preview& pv = *static_cast<Preview*>(handle);
+    pv.hl_a = surf_a;
+    pv.hl_b = surf_a < 0 ? -1 : surf_b;
+}
+
+FSP_API int fsp_surface_info(void* handle, int index, FspSurfaceInfo* out)
+{
+    const Preview& pv = *static_cast<const Preview*>(handle);
+    if (!out || !pv.lens_ok || index < 0 || index >= pv.lens.num_surfaces()) return -1;
+    const Surface& s = pv.lens.surfaces[index];
+    out->radius        = s.radius;
+    out->radius_y      = s.radius_y;
+    out->thickness     = s.thickness;
+    out->ior           = s.ior;
+    out->abbe_v        = s.abbe_v;
+    out->semi_aperture = s.semi_aperture;
+    out->z             = s.z;
+    out->coating       = s.coating;
+    out->is_stop       = s.is_stop ? 1 : 0;
+    out->surface_type  = s.surface_type;
+    return 0;
+}
+
+FSP_API float fsp_sensor_z(void* handle)
+{
+    const Preview& pv = *static_cast<const Preview*>(handle);
+    return pv.lens_ok ? pv.lens.sensor_z : 0.0f;
+}
+
+FSP_API int fsp_pick_ghosts(void* handle, const FspParams* p, int w, int h,
+                            float x, float y, int* out_a, int* out_b,
+                            float* out_share, int max_out)
+{
+    Preview& pv = *static_cast<Preview*>(handle);
+    pv.error.clear();
+    if (!p || w <= 0 || h <= 0 || max_out <= 0 || !out_a || !out_b || !out_share)
+    {
+        pv.error = "Bad arguments";
+        return 0;
+    }
+    if (!pv.lens_ok) return 0;
+    const Optics o = make_optics(pv, p, w, h);
+    if (pv.pairs.empty()) return 0;
+    TraceSetup ts;
+    if (!make_setup(pv, o.src, o.cfg, o.shw, o.shh, w, h, ts)) return 0;
+
+    // A few pixels, widened by the ghost blur, so small ghosts are easy
+    // to hit.
+    const float diag   = std::sqrt((float)w * w + (float)h * h);
+    const float blur   = p->ghost_blur_passes > 0 ? std::max(p->ghost_blur, 0.0f) * diag *
+                                                    std::sqrt((float)p->ghost_blur_passes)
+                                                  : 0.0f;
+    const float radius = std::max(3.0f, 0.004f * diag) + blur;
+    const std::vector<float> light = ghost_light_at(pv, ts, o.cfg, x, h - y, radius);
+
+    float total = 0.0f;
+    for (float v : light) total += v;
+    if (total <= 0.0f) return 0;
+    std::vector<int> order(light.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = (int)i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return light[a] > light[b]; });
+    int n = 0;
+    for (int i : order)
+    {
+        const float share = light[i] / total;
+        if (n >= max_out || share < 0.01f) break;
+        out_a[n] = pv.pairs[i].surf_a;
+        out_b[n] = pv.pairs[i].surf_b;
+        out_share[n] = share;
+        ++n;
+    }
+    return n;
 }
 
 FSP_API const char* fsp_last_error(void* handle)
@@ -393,48 +699,13 @@ FSP_API int fsp_render(void* handle, const FspParams* p,
     pv.g.assign(npx, 0.0f);
     pv.b.assign(npx, 0.0f);
 
-    // Optics, matching FlareSim::do_compute().
-    const float fov_h      = std::clamp(p->fov_h_deg, 1.0f, 170.0f) * (float)M_PI / 180.0f;
-    const float tan_half_h = std::tan(fov_h * 0.5f);
-    const float tan_half_v = tan_half_h * (float)h / (float)w;
-
-    // Source position: top-left pixel origin in, y-up optics inside.
-    const float ndc_x = (p->src_x - w * 0.5f) / w;
-    const float ndc_y = ((h - p->src_y) - h * 0.5f) / h;
-    const float si    = std::max(p->source_intensity, 0.0f) * 1000.0f;
-    BrightPixel src;
-    src.angle_x = std::atan(ndc_x * 2.0f * tan_half_h);
-    src.angle_y = std::atan(ndc_y * 2.0f * tan_half_v);
-    src.r = std::max(p->src_r, 0.0f) * si;
-    src.g = std::max(p->src_g, 0.0f) * si;
-    src.b = std::max(p->src_b, 0.0f) * si;
-
+    const Optics o = make_optics(pv, p, w, h);
     if (pv.lens_ok)
     {
-        const float shw = pv.lens.focal_length * tan_half_h;
-        const float shh = pv.lens.focal_length * tan_half_v;
-
-        GhostConfig cfg;
-        cfg.ray_grid              = std::clamp(p->ray_grid, 4, 256);
-        cfg.gain                  = std::max(p->flare_gain, 0.0f) * 1000.0f;
-        cfg.aperture_blades       = p->aperture_blades;
-        cfg.aperture_rotation_deg = p->aperture_rotation;
-        cfg.spectral_jitter       = 1;
-        cfg.spectral_jitter_seed  = p->seed;
-        cfg.pupil_jitter          = 1;   // stratified, so passes average out
-        cfg.pupil_jitter_seed     = p->seed;
-
-        if (shw != pv.pairs_shw || shh != pv.pairs_shh)
-        {
-            filter_ghost_pairs(pv.lens, shw, shh, cfg, pv.pairs, pv.boosts);
-            pv.pairs_shw = shw;
-            pv.pairs_shh = shh;
-        }
-
         if (!pv.pairs.empty())
-        {
-            render_cpu(pv, src, cfg, shw, shh, w, h);
-        }
+            render_cpu(pv, o.src, o.cfg, o.shw, o.shh, w, h);
+        else
+            pv.enabled_pairs = 0;
 
         if (p->ghost_blur > 0.0f && p->ghost_blur_passes > 0)
         {

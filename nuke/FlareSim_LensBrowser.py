@@ -8,6 +8,8 @@ A standalone Qt window for picking a lens and building a flare look:
     the divider to go from a one-row carousel to a grid
   * a live flare preview: drag the light around to see the ghosts move
   * look controls (gain, aperture, ghost blur) that drive the preview
+  * a Lens Elements tab: a side view of the lens, per-surface controls
+    (the node's Surfaces tab knobs) and Shift+click ghost picking
   * start from a saved look, apply the result to a FlareSim node, or save it
     as a new look
 
@@ -203,7 +205,28 @@ class FspParams(ctypes.Structure):
     ]
 
 
-FSP_API_VERSION = 1
+class FspSurface(ctypes.Structure):
+    """Mirror of FspSurface in src/preview.h."""
+    _fields_ = [
+        ('enabled', ctypes.c_int), ('gain', ctypes.c_float),
+        ('r', ctypes.c_float), ('g', ctypes.c_float), ('b', ctypes.c_float),
+        ('offset_x', ctypes.c_float), ('offset_y', ctypes.c_float),
+        ('scale', ctypes.c_float),
+    ]
+
+
+class FspSurfaceInfo(ctypes.Structure):
+    """Mirror of FspSurfaceInfo in src/preview.h."""
+    _fields_ = [
+        ('radius', ctypes.c_float), ('radius_y', ctypes.c_float),
+        ('thickness', ctypes.c_float), ('ior', ctypes.c_float),
+        ('abbe_v', ctypes.c_float), ('semi_aperture', ctypes.c_float),
+        ('z', ctypes.c_float), ('coating', ctypes.c_int),
+        ('is_stop', ctypes.c_int), ('surface_type', ctypes.c_int),
+    ]
+
+
+FSP_API_VERSION = 2
 
 _lib = None
 _lib_error = None
@@ -243,11 +266,170 @@ def preview_library():
         lib.fsp_num_pairs.argtypes = [ctypes.c_void_p]
         lib.fsp_last_error.argtypes = [ctypes.c_void_p]
         lib.fsp_last_error.restype = ctypes.c_char_p
+        lib.fsp_set_surfaces.argtypes = [ctypes.c_void_p, ctypes.POINTER(FspSurface),
+                                         ctypes.c_int]
+        lib.fsp_set_surfaces.restype = None
+        lib.fsp_set_highlight.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        lib.fsp_set_highlight.restype = None
+        lib.fsp_surface_info.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                         ctypes.POINTER(FspSurfaceInfo)]
+        lib.fsp_surface_info.restype = ctypes.c_int
+        lib.fsp_sensor_z.argtypes = [ctypes.c_void_p]
+        lib.fsp_sensor_z.restype = ctypes.c_float
+        lib.fsp_pick_ghosts.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(FspParams), ctypes.c_int, ctypes.c_int,
+            ctypes.c_float, ctypes.c_float, ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_float), ctypes.c_int]
+        lib.fsp_pick_ghosts.restype = ctypes.c_int
     except (OSError, AttributeError) as e:
         _lib_error = 'Could not load the live preview library %s: %s' % (path, e)
         return None, _lib_error
     _lib = lib
     return _lib, None
+
+
+# Per-surface settings, as on the node's Surfaces tab.  Offsets are in the
+# node's pixels; the preview scales them to its own size.
+SURF_DEFAULT = {'enabled': True, 'gain': 1.0, 'color': (1.0, 1.0, 1.0),
+                'offx': 0.0, 'offy': 0.0, 'scale': 1.0}
+# (knob name pattern, key), in the order of FlareSim_Looks.SURF_KNOBS.
+SURF_KNOB_KEYS = (('surf_%d', 'enabled'), ('surf_gain_%d', 'gain'),
+                  ('surf_color_%d', 'color'), ('surf_offx_%d', 'offx'),
+                  ('surf_offy_%d', 'offy'), ('surf_scale_%d', 'scale'))
+
+
+def default_surfaces():
+    return [dict(SURF_DEFAULT) for _ in range(FlareSim_Looks.MAX_SURFS)]
+
+
+def surface_changed(state):
+    """True when a surface's settings differ from the defaults."""
+    for key, default in SURF_DEFAULT.items():
+        value = state[key]
+        if key == 'color':
+            if any(abs(a - b) > 1e-6 for a, b in zip(value, default)):
+                return True
+        elif key == 'enabled':
+            if bool(value) != default:
+                return True
+        elif abs(value - default) > 1e-6:
+            return True
+    return False
+
+
+def surfaces_from_knobs(values):
+    """Surface states from a look's (or a node's) surf_* knob values."""
+    states = default_surfaces()
+    for i, state in enumerate(states):
+        for pattern, key in SURF_KNOB_KEYS:
+            v = values.get(pattern % i)
+            if v is None:
+                continue
+            if key == 'color':
+                v = list(v) if isinstance(v, (list, tuple)) else [v, v, v]
+                state[key] = tuple(float(c) for c in (v + v[-1:] * 3)[:3])
+            elif key == 'enabled':
+                state[key] = bool(v)
+            else:
+                state[key] = float(v)
+    return states
+
+
+def surfaces_to_knobs(states):
+    """surf_* knob values for the surfaces that are not at their defaults."""
+    knobs = {}
+    for i, state in enumerate(states):
+        for pattern, key in SURF_KNOB_KEYS:
+            value, default = state[key], SURF_DEFAULT[key]
+            if key == 'color':
+                if any(abs(a - b) > 1e-6 for a, b in zip(value, default)):
+                    knobs[pattern % i] = [float(c) for c in value]
+            elif key == 'enabled':
+                if bool(value) != default:
+                    knobs[pattern % i] = bool(value)
+            elif abs(value - default) > 1e-6:
+                knobs[pattern % i] = float(value)
+    return knobs
+
+
+def surface_array(packed):
+    """ctypes array from the tuples the window sends with each request."""
+    arr = (FspSurface * max(1, len(packed)))()
+    for i, t in enumerate(packed):
+        arr[i] = FspSurface(*t)
+    return arr, len(packed)
+
+
+class LensProbe(QtCore.QObject):
+    """A second preview handle for the Lens Elements tab: reads a lens's
+    surfaces for the diagram, and finds which ghosts light up a pixel on a
+    background thread."""
+
+    ghostsPicked = QtCore.Signal(object, float, float)   # [(a, b, share)], u, v
+
+    MAX_PICK = 6
+
+    def __init__(self, lib, parent=None):
+        super(LensProbe, self).__init__(parent)
+        self._lib = lib
+        self._handle = lib.fsp_create()
+        self._lock = threading.Lock()
+        self._lens = None
+        self._serial = 0
+
+    def _load(self, lens):
+        if lens != self._lens:
+            self._lib.fsp_load_lens(self._handle, (lens or '').encode('utf-8'))
+            self._lens = lens
+
+    def geometry(self, lens):
+        """The lens's surfaces as dicts, and the sensor position (mm)."""
+        out = []
+        with self._lock:
+            if not self._handle:
+                return out, 0.0
+            self._load(lens)
+            info = FspSurfaceInfo()
+            i = 0
+            while self._lib.fsp_surface_info(self._handle, i, ctypes.byref(info)) == 0:
+                out.append({name: getattr(info, name) for name, _t in FspSurfaceInfo._fields_})
+                i += 1
+            return out, float(self._lib.fsp_sensor_z(self._handle))
+
+    def pick(self, lens, params, surfaces, w, h, x, y, u, v):
+        """Find the ghosts at pixel (x, y) of a w x h render; emits
+        ghostsPicked.  Only the latest pick is reported."""
+        self._serial += 1
+        serial = self._serial
+
+        def run():
+            found = []
+            with self._lock:
+                if serial != self._serial or not self._handle:
+                    return
+                self._load(lens)
+                arr, n = surface_array(surfaces)
+                self._lib.fsp_set_surfaces(self._handle, arr, n)
+                a = (ctypes.c_int * self.MAX_PICK)()
+                b = (ctypes.c_int * self.MAX_PICK)()
+                share = (ctypes.c_float * self.MAX_PICK)()
+                p = FspParams(**params)
+                count = self._lib.fsp_pick_ghosts(self._handle, ctypes.byref(p), w, h, x, y,
+                                                  a, b, share, self.MAX_PICK)
+                found = [(a[i], b[i], share[i]) for i in range(count)]
+            if serial == self._serial:
+                self.ghostsPicked.emit(found, u, v)
+
+        t = threading.Thread(target=run, name='FlareSimGhostPick')
+        t.daemon = True
+        t.start()
+
+    def stop(self):
+        self._serial += 1
+        with self._lock:
+            if self._handle:
+                self._lib.fsp_destroy(self._handle)
+                self._handle = None
 
 
 class PreviewRenderer(QtCore.QObject):
@@ -277,7 +459,8 @@ class PreviewRenderer(QtCore.QObject):
 
     def request(self, req):
         """req: dict with lens, params (FspParams kwargs), width, height,
-        grid and passes."""
+        grid, passes, and optionally surfaces (FspSurface tuples) and
+        highlight (surf_a, surf_b)."""
         with self._cond:
             self._request = dict(req)
             self._serial += 1
@@ -334,6 +517,10 @@ class PreviewRenderer(QtCore.QObject):
             n = self._lib.fsp_load_lens(self._handle, (lens or '').encode('utf-8'))
             err = self._lib.fsp_last_error(self._handle).decode('utf-8', 'replace')
             self.lensLoaded.emit(lens or '', int(n), err)
+
+        arr, n = surface_array(req.get('surfaces', ()))
+        self._lib.fsp_set_surfaces(self._handle, arr, n)
+        self._lib.fsp_set_highlight(self._handle, *req.get('highlight', (-1, -1)))
 
         w, h = req['width'], req['height']
         params = FspParams(**req['params'])
@@ -474,11 +661,12 @@ class ThumbnailRenderer(QtCore.QObject):
 
 class PreviewView(QtWidgets.QWidget):
     """Shows the rendered flare.  Drag to move the light; the wheel changes
-    exposure."""
+    exposure; Shift+click or right-click picks a ghost."""
 
     sourceMoved = QtCore.Signal(float, float, bool)   # u, v (0..1), dragging
     dragStateChanged = QtCore.Signal(bool)
     exposureNudged = QtCore.Signal(float)
+    ghostPickRequested = QtCore.Signal(float, float)  # u, v (0..1)
 
     def __init__(self, parent=None):
         super(PreviewView, self).__init__(parent)
@@ -492,6 +680,7 @@ class PreviewView(QtWidgets.QWidget):
         self.source = (0.7, 0.3)
         self.message = ''
         self.status = ''
+        self.pick_marker = None   # (u, v) of the last ghost pick
         self._dragging = False
 
     def frame_rect(self):
@@ -534,11 +723,19 @@ class PreviewView(QtWidgets.QWidget):
         p.setBrush(QtCore.Qt.NoBrush)
         p.drawEllipse(QtCore.QPointF(sx, sy), 9, 9)
 
+        if self.pick_marker is not None:
+            mx = r.left() + self.pick_marker[0] * r.width()
+            my = r.top() + self.pick_marker[1] * r.height()
+            p.setPen(QtGui.QPen(QtGui.QColor(120, 220, 255, 230), 1.5))
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                p.drawLine(QtCore.QPointF(mx + dx * 4, my + dy * 4),
+                           QtCore.QPointF(mx + dx * 10, my + dy * 10))
+
         p.setPen(QtGui.QColor(190, 190, 190))
         if self.message:
             p.drawText(r.adjusted(24, 24, -24, -24),
                        QtCore.Qt.AlignCenter | QtCore.Qt.TextWordWrap, self.message)
-        hint = 'Drag to move the light   |   Wheel: exposure'
+        hint = 'Drag: move light   |   Shift+click: pick a ghost   |   Wheel: exposure'
         p.drawText(r.adjusted(8, 6, -8, -6), QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft, hint)
         if self.status:
             p.drawText(r.adjusted(8, 6, -8, -6), QtCore.Qt.AlignBottom | QtCore.Qt.AlignLeft,
@@ -554,7 +751,16 @@ class PreviewView(QtWidgets.QWidget):
         return min(max(u, -0.25), 1.25), min(max(v, -0.25), 1.25)
 
     def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
+        picking = (event.button() == QtCore.Qt.RightButton or
+                   (event.button() == QtCore.Qt.LeftButton and
+                    event.modifiers() & QtCore.Qt.ShiftModifier))
+        if picking:
+            u, v = self._event_pos(event)
+            if 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0:
+                self.pick_marker = (u, v)
+                self.ghostPickRequested.emit(u, v)
+                self.update()
+        elif event.button() == QtCore.Qt.LeftButton:
             self._dragging = True
             self.dragStateChanged.emit(True)
             self.source = self._event_pos(event)
@@ -691,7 +897,8 @@ class SliderRow(QtWidgets.QWidget):
 # ---------------------------------------------------------------------------
 
 # Look knobs the window edits directly.  Anything else in a loaded look
-# (highlight, spectral, per-surface overrides) is carried through untouched.
+# (highlight, spectral) is carried through untouched; per-surface settings
+# are edited on the Lens Elements tab.
 _EDITED_KNOBS = ('flare_gain', 'aperture_blades', 'aperture_rotation',
                  'ghost_blur', 'ghost_blur_passes')
 
@@ -717,12 +924,258 @@ def _breakable(name):
     return name.replace('_', '_\u200b')
 
 
+_SURF_KNOB_RE = re.compile(r'^surf_(?:gain_|color_|offx_|offy_|scale_)?\d+$')
+
+
+def _format_width(node):
+    """Width of the node's format in pixels, for surface offsets."""
+    for get in (lambda: node.format().width(), lambda: node.width(),
+                lambda: nuke.root().format().width()):
+        try:
+            w = int(get())
+            if w > 0:
+                return w
+        except Exception:
+            pass
+    return 1920
+
+
 def _node_alive(node):
     try:
         node.name()
         return True
     except (ValueError, AttributeError):
         return False
+
+
+def surface_sag(radius, y):
+    """Axial depth of a spherical surface at height y (0 when flat)."""
+    if abs(radius) < 1e-6 or y * y >= radius * radius:
+        return 0.0
+    return radius - (1.0 if radius > 0 else -1.0) * (radius * radius - y * y) ** 0.5
+
+
+class LensDiagram(QtWidgets.QWidget):
+    """A side view of the lens: each surface as its curve, glass shaded,
+    the iris marked.  Click a surface to select it."""
+
+    surfaceClicked = QtCore.Signal(int)
+
+    MARGIN = 14
+
+    def __init__(self, parent=None):
+        super(LensDiagram, self).__init__(parent)
+        self.setMinimumSize(240, 190)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        self.setMouseTracking(True)
+        self.surfaces = []      # dicts from LensProbe.geometry
+        self.sensor_z = 0.0
+        self.selected = -1
+        self.ghost = None       # (a, b) of the picked ghost
+        self.states = []        # per-surface settings, for changed / off marks
+        self.message = ''
+        self._hover = -1
+
+    def sizeHint(self):
+        return QtCore.QSize(340, 210)
+
+    def set_lens(self, surfaces, sensor_z):
+        self.surfaces, self.sensor_z = surfaces, sensor_z
+        self.selected, self.ghost, self._hover = -1, None, -1
+        self._fit_apertures()
+        self.update()
+
+    def _fit_apertures(self):
+        """Heights to draw each surface at.  Many converted prescriptions
+        list a clear diameter where a semi-diameter belongs, which would
+        draw curves crossing each other, so all apertures shrink by one
+        factor until neighbouring surfaces no longer cross."""
+        surfs = self.surfaces
+
+        def crosses(f):
+            for k in range(len(surfs) - 1):
+                s0, s1 = surfs[k], surfs[k + 1]
+                a = min(f * s0['semi_aperture'], f * s1['semi_aperture'])
+                gap = (s1['z'] + surface_sag(s1['radius'], a)) - (s0['z'] + surface_sag(s0['radius'], a))
+                if gap < -0.05 * max(s1['z'] - s0['z'], 0.05):
+                    return True
+            return False
+
+        f = 1.0
+        while f > 0.3 and crosses(f):
+            f *= 0.95
+        for s in surfs:
+            a = f * s['semi_aperture']
+            if abs(s['radius']) > 1e-6:
+                a = min(a, 0.98 * abs(s['radius']))
+            s['draw_aperture'] = a
+
+    # Mapping from lens space (z along the axis, y up, mm) to the widget.
+    def _transform(self):
+        if not self.surfaces:
+            return None
+        z0 = min(s['z'] + min(0.0, surface_sag(s['radius'], s['draw_aperture']))
+                 for s in self.surfaces)
+        z1 = max(self.sensor_z, max(s['z'] for s in self.surfaces))
+        ymax = max(s['draw_aperture'] for s in self.surfaces) * 1.15 or 1.0
+        m = self.MARGIN
+        w, h = self.width() - 2 * m, self.height() - 2 * m - 14
+        scale = min(w / max(z1 - z0, 1e-3), h / (2.0 * ymax))
+        ox = m + (w - (z1 - z0) * scale) / 2.0 - z0 * scale
+        oy = m + h / 2.0
+        return scale, ox, oy
+
+    def _curve(self, s, tf, steps=24):
+        scale, ox, oy = tf
+        a = s['draw_aperture']
+        pts = []
+        for i in range(steps + 1):
+            y = -a + 2.0 * a * i / steps
+            z = s['z'] + surface_sag(s['radius'], y)
+            pts.append(QtCore.QPointF(ox + z * scale, oy - y * scale))
+        return pts
+
+    def surface_at(self, x, y):
+        """Index of the surface nearest widget position (x, y), or -1."""
+        tf = self._transform()
+        if tf is None:
+            return -1
+        scale, ox, oy = tf
+        best, best_d = -1, 12.0
+        for i, s in enumerate(self.surfaces):
+            a = s['draw_aperture']
+            ly = (oy - y) / scale
+            if abs(ly) > a * 1.2:
+                continue
+            ly = max(-a, min(a, ly))
+            sx = ox + (s['z'] + surface_sag(s['radius'], ly)) * scale
+            d = abs(sx - x)
+            if d < best_d:
+                best, best_d = i, d
+        return best
+
+    def paintEvent(self, _event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.fillRect(self.rect(), QtGui.QColor(27, 27, 27))
+        tf = self._transform()
+        if tf is None:
+            p.setPen(QtGui.QColor(150, 150, 150))
+            p.drawText(self.rect().adjusted(12, 12, -12, -12),
+                       QtCore.Qt.AlignCenter | QtCore.Qt.TextWordWrap,
+                       self.message or 'Pick a lens to see its elements.')
+            p.end()
+            return
+        scale, ox, oy = tf
+        curves = [self._curve(s, tf) for s in self.surfaces]
+
+        # Optical axis and sensor.
+        p.setPen(QtGui.QPen(QtGui.QColor(70, 70, 70), 1, QtCore.Qt.DashLine))
+        p.drawLine(QtCore.QPointF(self.MARGIN, oy), QtCore.QPointF(self.width() - self.MARGIN, oy))
+        ymax = max(s['draw_aperture'] for s in self.surfaces)
+        sx = ox + self.sensor_z * scale
+        p.setPen(QtGui.QPen(QtGui.QColor(110, 110, 110), 2))
+        p.drawLine(QtCore.QPointF(sx, oy - ymax * 0.6 * scale),
+                   QtCore.QPointF(sx, oy + ymax * 0.6 * scale))
+
+        # Glass between a surface and the next when the medium after it is
+        # not air.
+        for i, s in enumerate(self.surfaces[:-1]):
+            if s['ior'] > 1.01 and not s['is_stop']:
+                poly = QtGui.QPolygonF(curves[i] + list(reversed(curves[i + 1])))
+                p.setPen(QtCore.Qt.NoPen)
+                p.setBrush(QtGui.QColor(90, 140, 190, 70))
+                p.drawPolygon(poly)
+
+        # Surfaces.
+        for i, s in enumerate(self.surfaces):
+            state = self.states[i] if i < len(self.states) else SURF_DEFAULT
+            off = not state['enabled']
+            in_ghost = self.ghost is not None and i in self.ghost
+            if s['is_stop']:
+                a = s['draw_aperture']
+                x = ox + s['z'] * scale
+                p.setPen(QtGui.QPen(QtGui.QColor(200, 200, 200), 2))
+                for sign in (1, -1):
+                    p.drawLine(QtCore.QPointF(x, oy - sign * a * scale),
+                               QtCore.QPointF(x, oy - sign * ymax * 1.12 * scale))
+                if i != self.selected and not in_ghost:
+                    continue
+            colour = QtGui.QColor(150, 175, 195)
+            width = 1.4
+            if off:
+                colour = QtGui.QColor(170, 70, 70)
+            elif surface_changed(state):
+                colour = QtGui.QColor(90, 210, 230)
+            if in_ghost:
+                colour, width = QtGui.QColor(255, 150, 60), 2.6
+            if i == self._hover:
+                width += 1.0
+            if i == self.selected:
+                colour, width = QtGui.QColor(255, 210, 90), 3.0
+            pen = QtGui.QPen(colour, width)
+            if off:
+                pen.setStyle(QtCore.Qt.DashLine)
+            p.setPen(pen)
+            p.setBrush(QtCore.Qt.NoBrush)
+            p.drawPolyline(QtGui.QPolygonF(curves[i]))
+
+        # Labels for the selected surface and the picked ghost's surfaces.
+        p.setPen(QtGui.QColor(220, 220, 220))
+        marks = {}
+        if self.ghost is not None:
+            marks[self.ghost[0]] = 'A'
+            marks[self.ghost[1]] = 'B'
+        if self.selected >= 0:
+            marks[self.selected] = marks.get(self.selected, '') + ' %d' % self.selected
+        for i, text in marks.items():
+            if 0 <= i < len(curves):
+                top = curves[i][-1]
+                p.drawText(QtCore.QRectF(top.x() - 30, top.y() - 18, 60, 16),
+                           QtCore.Qt.AlignCenter, text.strip())
+
+        p.setPen(QtGui.QColor(130, 130, 130))
+        p.drawText(self.rect().adjusted(8, 0, -8, -4), QtCore.Qt.AlignBottom | QtCore.Qt.AlignLeft,
+                   'Click a surface to edit it.')
+        p.end()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position() if hasattr(event, 'position') else event.pos()
+        i = self.surface_at(pos.x(), pos.y())
+        if i != self._hover:
+            self._hover = i
+            self.setCursor(QtCore.Qt.PointingHandCursor if i >= 0 else QtCore.Qt.ArrowCursor)
+            self.setToolTip(surface_description(self.surfaces[i], i) if i >= 0 else '')
+            self.update()
+
+    def leaveEvent(self, event):
+        self._hover = -1
+        self.update()
+        super(LensDiagram, self).leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            pos = event.position() if hasattr(event, 'position') else event.pos()
+            i = self.surface_at(pos.x(), pos.y())
+            if i >= 0:
+                self.surfaceClicked.emit(i)
+
+
+def surface_description(s, i):
+    """One line about a surface for labels and tooltips."""
+    if s['is_stop']:
+        return 'Surface %d: the iris (aperture stop), %.1f mm across' % (i, 2 * s['semi_aperture'])
+    shape = {1: 'cylinder X', 2: 'cylinder Y', 3: 'toric'}.get(s['surface_type'], '')
+    if abs(s['radius']) < 1e-6:
+        curve = 'flat'
+    else:
+        curve = 'R %.1f mm' % s['radius']
+    if shape:
+        curve = '%s %s' % (shape, curve)
+    behind = 'glass n %.3f behind' % s['ior'] if s['ior'] > 1.01 else 'air behind'
+    coat = 'uncoated' if s['coating'] <= 0 else (
+        'single coated' if s['coating'] == 1 else 'multi-coated (%d)' % s['coating'])
+    return 'Surface %d: %s, %s, %s' % (i, curve, behind, coat)
 
 
 class LensBrowserWindow(QtWidgets.QWidget):
@@ -744,6 +1197,16 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._surfaces = 0
         self._items = {}               # lens path -> grid item
         self._has_thumb = set()
+        self._surf = default_surfaces()   # per-surface settings for this lens
+        # Surfaces edited here since the settings were last in step with
+        # the node; all of them after a look or a lens change.
+        self._surf_dirty = set()
+        self._surf_all_dirty = False
+        self._sel_surface = -1
+        self._ghost = None             # (surf_a, surf_b) of the picked ghost
+        self._picked = []              # [(a, b, share)] from the last pick
+        self._ref_width = 1920         # node format width, for surface offsets
+        self._probe = None
 
         self._build_ui()
 
@@ -756,8 +1219,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._renderer.lensLoaded.connect(self._on_lens_loaded)
             self._thumbs = ThumbnailRenderer(lib, self)
             self._thumbs.thumbReady.connect(self._on_thumbnail)
+            self._probe = LensProbe(lib, self)
+            self._probe.ghostsPicked.connect(self._on_ghosts_picked)
         else:
             self.view.message = err
+            self.diagram.message = err
 
         self._thumb_timer = QtCore.QTimer(self)
         self._thumb_timer.setSingleShot(True)
@@ -909,6 +1375,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
         lv.addWidget(look_box)
         lv.addStretch(1)
 
+        self.tabs = QtWidgets.QTabWidget()
+        look_tab = QtWidgets.QWidget()
+        tv = QtWidgets.QVBoxLayout(look_tab)
+        tv.setContentsMargins(4, 6, 4, 4)
+
         flare_box = QtWidgets.QGroupBox('Flare Look')
         fl = QtWidgets.QFormLayout(flare_box)
         self.gain = SliderRow(0.0, 50.0, 10.0, decimals=2, step=0.5)
@@ -928,7 +1399,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.extra_label.setWordWrap(True)
         self.extra_label.setStyleSheet('color: #999;')
         fl.addRow(self.extra_label)
-        rv.addWidget(flare_box)
+        tv.addWidget(flare_box)
 
         light_box = QtWidgets.QGroupBox('Preview Light and Camera')
         ll = QtWidgets.QFormLayout(light_box)
@@ -950,8 +1421,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
         note.setWordWrap(True)
         note.setStyleSheet('color: #999;')
         ll.addRow(note)
-        rv.addWidget(light_box)
-        rv.addStretch(1)
+        tv.addWidget(light_box)
+        tv.addStretch(1)
+        self.tabs.addTab(look_tab, 'Look')
+        self.tabs.addTab(self._build_elements_tab(), 'Lens Elements')
+        rv.addWidget(self.tabs, 1)
 
         self.target_label = QtWidgets.QLabel()
         self.target_label.setWordWrap(True)
@@ -982,7 +1456,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         splitter.addWidget(scroll)
         scroll.setMinimumWidth(right.minimumSizeHint().width() +
                                scroll.verticalScrollBar().sizeHint().width() + 4)
-        scroll.setMaximumWidth(scroll.minimumWidth() + 120)
+        scroll.setMaximumWidth(scroll.minimumWidth() + 240)
         self.exposure.setMinimumWidth(160)
         left.setMinimumWidth(260)
         left.setMaximumWidth(400)
@@ -990,7 +1464,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([300, 900, 330])
+        splitter.setSizes([300, 860, 380])
         self.main_split = splitter
 
         # Signals.
@@ -1015,6 +1489,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.view.dragStateChanged.connect(self._on_drag_state)
         self.view.exposureNudged.connect(
             lambda d: self.exposure.setValue(self.exposure.value() + d))
+        self.view.ghostPickRequested.connect(self._pick_ghost)
+        self.tabs.currentChanged.connect(self._schedule_render)
 
         QShortcut(QtGui.QKeySequence('Ctrl+F'), self, self.search.setFocus)
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_PageUp), self,
@@ -1022,6 +1498,301 @@ class LensBrowserWindow(QtWidgets.QWidget):
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_PageDown), self,
                             lambda: self._step_lens(1))
         self._update_colour_button()
+
+    def _build_elements_tab(self):
+        tab = QtWidgets.QWidget()
+        ev = QtWidgets.QVBoxLayout(tab)
+        ev.setContentsMargins(4, 6, 4, 4)
+
+        self.diagram = LensDiagram()
+        self.diagram.states = self._surf
+        self.diagram.surfaceClicked.connect(lambda i: self._select_surface(i, keep_ghost=True))
+        ev.addWidget(self.diagram)
+
+        nav = QtWidgets.QHBoxLayout()
+        prev_btn = QtWidgets.QToolButton()
+        prev_btn.setArrowType(QtCore.Qt.LeftArrow)
+        prev_btn.setToolTip('Previous surface')
+        prev_btn.clicked.connect(lambda: self._step_surface(-1))
+        next_btn = QtWidgets.QToolButton()
+        next_btn.setArrowType(QtCore.Qt.RightArrow)
+        next_btn.setToolTip('Next surface')
+        next_btn.clicked.connect(lambda: self._step_surface(1))
+        self.surf_title = QtWidgets.QLabel()
+        self.surf_title.setWordWrap(True)
+        nav.addWidget(prev_btn)
+        nav.addWidget(self.surf_title, 1)
+        nav.addWidget(next_btn)
+        ev.addLayout(nav)
+
+        surf_box = QtWidgets.QGroupBox('Surface')
+        sf = QtWidgets.QFormLayout(surf_box)
+        self.surf_enabled = QtWidgets.QCheckBox('Makes ghosts')
+        self.surf_enabled.setToolTip('Off drops every ghost that bounces off this surface.')
+        self.surf_gain = SliderRow(0.0, 5.0, 1.0, decimals=2, step=0.05)
+        self.surf_gain.setToolTip('Brightness of the ghosts off this surface. A ghost '
+                                  'bounces off two surfaces, so both gains multiply.')
+        self.surf_colour_btn = QtWidgets.QPushButton()
+        self.surf_colour_btn.setToolTip('Tint for the ghosts off this surface, '
+                                        'like a coloured coating.')
+        self.surf_colour_btn.clicked.connect(self._choose_surface_colour)
+        self.surf_offx = SliderRow(-1000.0, 1000.0, 0.0, decimals=1, step=1.0)
+        self.surf_offy = SliderRow(-1000.0, 1000.0, 0.0, decimals=1, step=1.0)
+        for row in (self.surf_offx, self.surf_offy):
+            row.spin.setRange(-10000.0, 10000.0)
+            row.setToolTip('Shift the ghosts off this surface, in the node\'s pixels. '
+                           'A ghost\'s two surfaces add their shifts.')
+        self.surf_scale = SliderRow(0.25, 3.0, 1.0, decimals=3, step=0.01)
+        self.surf_scale.setToolTip('Grow or shrink the ghosts off this surface about the '
+                                   'frame centre.')
+        sf.addRow(self.surf_enabled)
+        sf.addRow('Gain', self.surf_gain)
+        sf.addRow('Tint', self.surf_colour_btn)
+        sf.addRow('Offset X', self.surf_offx)
+        sf.addRow('Offset Y', self.surf_offy)
+        sf.addRow('Scale', self.surf_scale)
+        resets = QtWidgets.QHBoxLayout()
+        reset_one = QtWidgets.QPushButton('Reset Surface')
+        reset_one.clicked.connect(self._reset_surface)
+        reset_all = QtWidgets.QPushButton('Reset All')
+        reset_all.setToolTip('Put every surface back to its defaults.')
+        reset_all.clicked.connect(self._reset_all_surfaces)
+        resets.addWidget(reset_one)
+        resets.addWidget(reset_all)
+        sf.addRow(resets)
+        self.surf_changed_label = QtWidgets.QLabel()
+        self.surf_changed_label.setStyleSheet('color: #999;')
+        sf.addRow(self.surf_changed_label)
+        ev.addWidget(surf_box)
+        self._surf_controls = [self.surf_enabled, self.surf_gain, self.surf_colour_btn,
+                               self.surf_offx, self.surf_offy, self.surf_scale,
+                               reset_one]
+
+        ghost_box = QtWidgets.QGroupBox('Pick a Ghost')
+        gv = QtWidgets.QVBoxLayout(ghost_box)
+        hint = QtWidgets.QLabel('Shift+click (or right-click) a ghost in the preview to '
+                                'see which two surfaces make it.')
+        hint.setWordWrap(True)
+        hint.setStyleSheet('color: #999;')
+        gv.addWidget(hint)
+        self.ghost_list = QtWidgets.QListWidget()
+        self.ghost_list.setMaximumHeight(110)
+        self.ghost_list.currentRowChanged.connect(self._on_ghost_row)
+        gv.addWidget(self.ghost_list)
+        pair_row = QtWidgets.QHBoxLayout()
+        self.ghost_a_btn = QtWidgets.QPushButton('Edit A')
+        self.ghost_b_btn = QtWidgets.QPushButton('Edit B')
+        self.ghost_a_btn.clicked.connect(lambda: self._edit_ghost_surface(0))
+        self.ghost_b_btn.clicked.connect(lambda: self._edit_ghost_surface(1))
+        pair_row.addWidget(self.ghost_a_btn)
+        pair_row.addWidget(self.ghost_b_btn)
+        gv.addLayout(pair_row)
+        self.highlight_check = QtWidgets.QCheckBox('Highlight in the preview')
+        self.highlight_check.setChecked(True)
+        self.highlight_check.setToolTip('Dim the other ghosts in the preview so the picked '
+                                        'ghost, or the selected surface\'s ghosts, stand out. '
+                                        'The node is not affected.')
+        self.highlight_check.toggled.connect(self._schedule_render)
+        gv.addWidget(self.highlight_check)
+        ev.addWidget(ghost_box)
+        ev.addStretch(1)
+
+        self.surf_enabled.toggled.connect(lambda v: self._edit_surface('enabled', bool(v)))
+        for row, key in ((self.surf_gain, 'gain'), (self.surf_offx, 'offx'),
+                         (self.surf_offy, 'offy'), (self.surf_scale, 'scale')):
+            row.valueChanged.connect(lambda v, key=key: self._edit_surface(key, v))
+        self._update_surface_panel()
+        self._update_ghost_list()
+        return tab
+
+    # -- lens elements --------------------------------------------------
+
+    def _num_surfaces(self):
+        return len(self.diagram.surfaces)
+
+    def _select_surface(self, i, keep_ghost=False):
+        if not keep_ghost or (self._ghost is not None and i not in self._ghost):
+            self._clear_ghost()
+        self._sel_surface = i if 0 <= i < self._num_surfaces() else -1
+        self.diagram.selected = self._sel_surface
+        self.diagram.update()
+        self._update_surface_panel()
+        self._schedule_render()
+
+    def _step_surface(self, delta):
+        n = self._num_surfaces()
+        if n:
+            start = self._sel_surface if self._sel_surface >= 0 else (-1 if delta > 0 else 0)
+            self._select_surface((start + delta) % n)
+
+    def _update_surface_panel(self):
+        i = self._sel_surface
+        n = self._num_surfaces()
+        valid = 0 <= i < n
+        for w in self._surf_controls:
+            w.setEnabled(valid)
+        if valid:
+            self.surf_title.setText(surface_description(self.diagram.surfaces[i], i))
+        elif n:
+            self.surf_title.setText('%d surfaces. Click one in the diagram.' % n)
+        else:
+            self.surf_title.setText('')
+        state = self._surf[i] if valid else SURF_DEFAULT
+        for w in (self.surf_enabled, self.surf_gain, self.surf_offx, self.surf_offy,
+                  self.surf_scale):
+            w.blockSignals(True)
+        self.surf_enabled.setChecked(bool(state['enabled']))
+        self.surf_gain.setValue(state['gain'])
+        self.surf_offx.setValue(state['offx'])
+        self.surf_offy.setValue(state['offy'])
+        self.surf_scale.setValue(state['scale'])
+        for w in (self.surf_enabled, self.surf_gain, self.surf_offx, self.surf_offy,
+                  self.surf_scale):
+            w.blockSignals(False)
+        for row in (self.surf_gain, self.surf_offx, self.surf_offy, self.surf_scale):
+            row._sync_slider(row.value())
+        c = state['color']
+        swatch = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
+        label = '' if all(abs(v - 1.0) < 1e-6 for v in c) else '%.2f  %.2f  %.2f' % tuple(c)
+        self.surf_colour_btn.setText(label)
+        text_colour = '#000' if swatch.lightnessF() > 0.5 else '#fff'
+        self.surf_colour_btn.setStyleSheet('background-color: %s; color: %s; min-height: 18px;'
+                                           % (swatch.name(), text_colour))
+        changed = sum(1 for k in range(n) if surface_changed(self._surf[k]))
+        self.surf_changed_label.setText(
+            '%d of %d surfaces changed.' % (changed, n) if changed else '')
+
+    def _edit_surface(self, key, value):
+        i = self._sel_surface
+        if not 0 <= i < self._num_surfaces():
+            return
+        self._surf[i][key] = value
+        self._surf_dirty.add(i)
+        self.diagram.update()
+        self._update_surface_panel()
+        self._schedule_render()
+
+    def _choose_surface_colour(self):
+        i = self._sel_surface
+        if not 0 <= i < self._num_surfaces():
+            return
+        c = self._surf[i]['color']
+        start = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
+        chosen = QtWidgets.QColorDialog.getColor(start, self, 'Surface %d Tint' % i)
+        if chosen.isValid():
+            self._edit_surface('color', (chosen.redF(), chosen.greenF(), chosen.blueF()))
+
+    def _reset_surface(self):
+        i = self._sel_surface
+        if 0 <= i < self._num_surfaces():
+            self._surf[i].update(SURF_DEFAULT)
+            self._surf_dirty.add(i)
+            self.diagram.update()
+            self._update_surface_panel()
+            self._schedule_render()
+
+    def _reset_all_surfaces(self):
+        for state in self._surf:
+            state.update(SURF_DEFAULT)
+        self._surf_all_dirty = True
+        self.diagram.update()
+        self._update_surface_panel()
+        self._schedule_render()
+
+    def _set_surfaces(self, states):
+        """Replace every surface's settings (from a node or a look)."""
+        for state, new in zip(self._surf, states):
+            state.clear()
+            state.update(new)
+        self.diagram.update()
+        self._update_surface_panel()
+
+    def _packed_surfaces(self):
+        """Surface settings for the preview library: offsets go from the
+        node's pixels to fractions of the image width."""
+        ref = float(max(self._ref_width, 1))
+        out = []
+        for state in self._surf[:max(self._num_surfaces(), 0)]:
+            r, g, b = state['color']
+            out.append((int(bool(state['enabled'])), state['gain'], r, g, b,
+                        state['offx'] / ref, state['offy'] / ref, state['scale']))
+        return out
+
+    def _highlight(self):
+        if (self.tabs.currentIndex() != 1 or not self.highlight_check.isChecked()):
+            return (-1, -1)
+        if self._ghost is not None:
+            return self._ghost
+        if self._sel_surface >= 0:
+            return (self._sel_surface, -1)
+        return (-1, -1)
+
+    def _pick_ghost(self, u, v):
+        if self._probe is None or not self._lens_path:
+            return
+        if self.tabs.currentIndex() != 1:
+            self.tabs.setCurrentIndex(1)
+        req = self._render_request()
+        params = dict(req['params'], ray_grid=min(req['grid'], 48))
+        w, h = req['width'], req['height']
+        self.ghost_list.clear()
+        self.ghost_list.addItem('Looking...')
+        self._probe.pick(self._lens_path, params, req['surfaces'], w, h,
+                         u * w, v * h, u, v)
+
+    def _on_ghosts_picked(self, found, u, v):
+        self._picked = list(found)
+        if self.view.pick_marker != (u, v):
+            return
+        self._update_ghost_list()
+        if self._picked:
+            self.ghost_list.setCurrentRow(0)
+        else:
+            self._clear_ghost(keep_list=True)
+
+    def _update_ghost_list(self):
+        self.ghost_list.blockSignals(True)
+        self.ghost_list.clear()
+        for a, b, share in self._picked:
+            item = QtWidgets.QListWidgetItem('Surfaces %d + %d   %.0f%%' % (a, b, share * 100.0))
+            item.setToolTip('This ghost bounces off surfaces %d and %d and makes %.0f%% of '
+                            'the light where you clicked.' % (a, b, share * 100.0))
+            self.ghost_list.addItem(item)
+        if not self._picked and self.view.pick_marker is not None:
+            self.ghost_list.addItem('No ghost there. Try a brighter spot.')
+        self.ghost_list.blockSignals(False)
+        has = self._ghost is not None
+        self.ghost_a_btn.setEnabled(has)
+        self.ghost_b_btn.setEnabled(has)
+        if has:
+            self.ghost_a_btn.setText('Edit %d' % self._ghost[0])
+            self.ghost_b_btn.setText('Edit %d' % self._ghost[1])
+        else:
+            self.ghost_a_btn.setText('Edit A')
+            self.ghost_b_btn.setText('Edit B')
+
+    def _on_ghost_row(self, row):
+        if not 0 <= row < len(self._picked):
+            return
+        a, b, _share = self._picked[row]
+        self._ghost = (a, b)
+        self.diagram.ghost = self._ghost
+        self._update_ghost_list()
+        self._select_surface(a, keep_ghost=True)
+
+    def _edit_ghost_surface(self, which):
+        if self._ghost is not None:
+            self._select_surface(self._ghost[which], keep_ghost=True)
+
+    def _clear_ghost(self, keep_list=False):
+        self._ghost = None
+        self.diagram.ghost = None
+        if not keep_list:
+            self._picked = []
+            self.view.pick_marker = None
+            self.view.update()
+        self._update_ghost_list()
+        self.diagram.update()
 
     # -- lens list ------------------------------------------------------
 
@@ -1176,17 +1947,40 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if path:
             self.set_lens(path)
 
-    def set_lens(self, path):
-        """Show a lens: select it in the grid (if listed) and preview it."""
-        self._lens_path = path.replace('\\', '/')
+    def set_lens(self, path, surfaces=None):
+        """Show a lens: select it in the grid (if listed) and preview it.
+
+        surfaces: per-surface settings to use with it.  Without them a new
+        lens starts with every surface at its defaults, since its surfaces
+        are not the old lens's.
+        """
+        path = path.replace('\\', '/')
+        changed = path != self._lens_path
+        self._lens_path = path
         item = self._items.get(self._lens_path)
         if item is not None and not item.isHidden():
             self._select_item(item)
         else:
             self.grid.clearSelection()
+        if surfaces is not None:
+            self._set_surfaces(surfaces)
+        elif changed:
+            self._set_surfaces(default_surfaces())
+            self._surf_all_dirty = True
+        if changed:
+            self._load_geometry()
         self._surfaces = 0
         self._update_info()
         self._schedule_render()
+
+    def _load_geometry(self):
+        geom, sensor_z = ([], 0.0)
+        if self._probe is not None and self._lens_path:
+            geom, sensor_z = self._probe.geometry(self._lens_path)
+        self.diagram.set_lens(geom, sensor_z)
+        self._sel_surface = -1
+        self._clear_ghost()
+        self._update_surface_panel()
 
     def _lens_info(self):
         for l in self._lenses:
@@ -1248,10 +2042,14 @@ class LensBrowserWindow(QtWidgets.QWidget):
         lens = FlareSim_Looks.resolve_lens(look.get('lens', ''))
         if look.get('lens') and not lens:
             QtWidgets.QMessageBox.warning(self, 'FlareSim', 'Lens not found: %s' % look['lens'])
-        self._set_look_values(look.get('knobs', {}))
+        surfaces = self._set_look_values(look.get('knobs', {}))
         self._look_name = look['name']
         if lens:
-            self.set_lens(lens)
+            self.set_lens(lens, surfaces)
+        else:
+            self._set_surfaces(surfaces)
+        # A look defines every surface.
+        self._surf_all_dirty = True
 
     def _set_look_values(self, values):
         rows = {'flare_gain': self.gain, 'aperture_blades': self.blades,
@@ -1262,18 +2060,23 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 row.blockSignals(True)
                 row.setValue(values[k])
                 row.blockSignals(False)
-        self._look_extra = {k: v for k, v in values.items() if k not in _EDITED_KNOBS}
+        self._look_extra = {k: v for k, v in values.items()
+                            if k not in _EDITED_KNOBS and not _SURF_KNOB_RE.match(k)}
         if self._look_extra:
             self.extra_label.setText('Also from the look: %d more settings (highlight, '
-                                     'spectral, surfaces...) kept as they are.'
+                                     'spectral...) kept as they are.'
                                      % len(self._look_extra))
         else:
             self.extra_label.setText('')
         self._schedule_render()
+        return surfaces_from_knobs(values)
 
-    def current_look(self, name=''):
-        """The window's settings as a look dict."""
+    def current_look(self, name='', surfaces=True):
+        """The window's settings as a look dict.  With surfaces, it includes
+        the per-surface settings that differ from their defaults."""
         knobs = dict(self._look_extra)
+        if surfaces:
+            knobs.update(surfaces_to_knobs(self._surf[:self._num_surfaces() or None]))
         knobs.update({
             'flare_gain': self.gain.value(),
             'aperture_blades': int(self.blades.value()),
@@ -1363,8 +2166,13 @@ class LensBrowserWindow(QtWidgets.QWidget):
         for k in FlareSim_Looks.LOOK_KNOBS:
             if k in knobs:
                 values[k] = FlareSim_Looks._knob_value(knobs[k])
-        # Leave per-surface overrides on the node alone; carry through the rest.
-        self._set_look_values(values)
+        for i in range(FlareSim_Looks.MAX_SURFS):
+            for pattern, _key in SURF_KNOB_KEYS:
+                k = pattern % i
+                if k in knobs:
+                    values[k] = FlareSim_Looks._knob_value(knobs[k])
+        surfaces = self._set_look_values(values)
+        self._ref_width = _format_width(node)
         for k, row in (('fov_h', self.fov), ('source_intensity', self.intensity)):
             if k in knobs:
                 row.setValue(float(knobs[k].value()))
@@ -1373,7 +2181,12 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if lens:
             lens = nuke.filenameFilter(lens) if hasattr(nuke, 'filenameFilter') else lens
         if lens and os.path.isfile(lens):
-            self.set_lens(lens)
+            self.set_lens(lens, surfaces)
+        else:
+            self._set_surfaces(surfaces)
+        self._surf_dirty.clear()
+        self._surf_all_dirty = False
+        self._schedule_render()
 
     def _apply_to_node(self):
         if not self._lens_path:
@@ -1383,13 +2196,24 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._update_target_label()
         if not nodes:
             return
-        look = self.current_look(self._look_name)
-        look['lens'] = self._lens_path
-        # Keep a node's per-surface tweaks when only the look changes; a new
-        # lens has different surfaces, so reset them then.
+        # A new lens (or a look) sets every surface.  Otherwise only the
+        # surfaces edited here are written, so tweaks made on the node's
+        # Surfaces tab in the meantime are kept.
         same_lens = all(os.path.normcase(n['lens_file'].value().replace('\\', '/')) ==
                         os.path.normcase(self._lens_path) for n in nodes)
-        warnings = FlareSim_Looks.apply_look(look, nodes, reset_surfaces=not same_lens)
+        all_surfaces = self._surf_all_dirty or not same_lens
+        look = self.current_look(self._look_name, surfaces=all_surfaces)
+        look['lens'] = self._lens_path
+        if not all_surfaces:
+            for i in sorted(self._surf_dirty):
+                state = self._surf[i]
+                for pattern, key in SURF_KNOB_KEYS:
+                    v = state[key]
+                    look['knobs'][pattern % i] = list(v) if key == 'color' else v
+        warnings = FlareSim_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
+        self._surf_dirty.clear()
+        self._surf_all_dirty = False
+        self._ref_width = _format_width(nodes[0])
         if warnings:
             QtWidgets.QMessageBox.warning(self, 'FlareSim', '\n'.join(warnings))
         nuke.tprint('FlareSim: applied %s to %s' % (
@@ -1442,12 +2266,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if self._renderer is None:
             self.view.update()
             return
+        self._renderer.request(self._render_request())
+
+    def _render_request(self):
         w, h = self.view.render_size()
         u, v = self.view.source
         c = self._source_colour
         _label, grid, passes = QUALITY[self.quality.currentIndex()]
-        self._renderer.request({
+        return {
             'lens': self._lens_path,
+            'surfaces': self._packed_surfaces(),
+            'highlight': self._highlight(),
             'width': w, 'height': h, 'grid': grid, 'passes': passes,
             'params': dict(
                 src_x=u * w, src_y=v * h,
@@ -1463,7 +2292,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 exposure=self.exposure.value(),
                 draw_source=int(self.show_source.isChecked()),
                 accumulate=0, seed=0),
-        })
+        }
 
     def _on_frame(self, image, passes, ms, pairs):
         self.view.image = image
@@ -1523,6 +2352,9 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if self._thumbs is not None:
             self._thumbs.stop()
             self._thumbs = None
+        if self._probe is not None:
+            self._probe.stop()
+            self._probe = None
         if _window is self:
             _window = None
         super(LensBrowserWindow, self).closeEvent(event)

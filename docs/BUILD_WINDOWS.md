@@ -108,6 +108,7 @@ Restart Nuke 15. You should see:
 3. Click **Lens Browser** on the node, type `50mm` in the search box, click a lens thumbnail (for example the Canon New FD 50mm f/1.4), drag the light around the preview, then click **Apply to Node**.
 4. **Source Mode** is **Auto Detect** by default. Set **View** to **Sources Only**, adjust **Threshold** until only the light is marked, then set **View** back to **Flare**.
 5. Adjust **Flare Gain**.
+6. In the Lens Browser, open the **Lens Elements** tab and Shift+click a ghost in the preview. Pick the ghost in the list, change its surface's **Tint** or **Gain**, and click **Apply to Node**: the node's Surfaces tab shows the same values.
 
 If CUDA fails (no GPU, old driver), the node shows the error in red.
 
