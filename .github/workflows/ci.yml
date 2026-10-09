@@ -28,12 +28,33 @@ jobs:
       - name: Compile kernels
         run: |
           for f in src/ghost_cuda.cu src/blur_cuda.cu; do
-            nvcc -std=c++17 --expt-relaxed-constexpr -Xcompiler -fPIC \
+            nvcc -std=c++17 --expt-relaxed-constexpr -Wno-deprecated-gpu-targets -Xcompiler -fPIC \
                  -gencode arch=compute_70,code=sm_70 \
                  -gencode arch=compute_86,code=sm_86 \
                  -gencode arch=compute_120,code=sm_120 \
                  -Isrc -c "$f" -o "/tmp/$(basename "$f").o"
           done
+
+  # Same kernel compile with MSVC as the host compiler, to catch
+  # GCC-only syntax before it reaches a Windows build.
+  cuda-compile-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CUDA compiler
+        shell: pwsh
+        run: |
+          $url = "https://developer.download.nvidia.com/compute/cuda/12.8.1/network_installers/cuda_12.8.1_windows_network.exe"
+          Invoke-WebRequest $url -OutFile cuda.exe
+          Start-Process -Wait -FilePath .\cuda.exe -ArgumentList "-s","nvcc_12.8","cudart_12.8","visual_studio_integration_12.8"
+          "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Compile kernels
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for %%f in (ghost_cuda blur_cuda) do (
+            nvcc -std=c++17 --expt-relaxed-constexpr -Wno-deprecated-gpu-targets -DNOMINMAX -D_USE_MATH_DEFINES -DWIN32_LEAN_AND_MEAN -Xcompiler=/EHsc -gencode arch=compute_86,code=sm_86 -Isrc -c src\%%f.cu -o %%f.obj || exit /b 1
+          )
 
   python-syntax:
     runs-on: ubuntu-24.04
