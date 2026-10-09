@@ -25,8 +25,6 @@ git clone https://github.com/calcipher89/flaresim_nuke.git
 cd flaresim_nuke
 ```
 
-Until PR #1 is merged, check out its branch with `git checkout cleanup/unified-build`.
-
 ## 3. Open a VS 2019 developer prompt
 
 From the Start menu, open **x64 Native Tools Command Prompt for VS 2019**.
@@ -108,7 +106,7 @@ Restart Nuke 15. You should see:
 1. Read in a plate with a bright light, or use a `Constant` with a small bright `Radial` merged on top.
 2. Add **FlareSim** after it.
 3. In the Lens Browser, type `50mm` in **Filter**, press **Refresh**, pick a lens (for example the Canon New FD 50mm f/1.4) and click **Load onto selected FlareSim**.
-4. Set **Source Mode** to **Auto Detect**, then raise **Threshold** until only the light is flaring.
+4. **Source Mode** is **Auto Detect** by default. Set **View** to **Sources Only**, adjust **Threshold** until only the light is marked, then set **View** back to **Flare**.
 5. Adjust **Flare Gain**.
 
 If CUDA fails (no GPU, old driver), the node shows the error in red.
