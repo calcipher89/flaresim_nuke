@@ -197,7 +197,7 @@ The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → Fl
   - The side view traces light through the lens from the preview light's angle: a faint image-forming ray, and the ghost paths of the selected surface (or the picked ghost) bouncing between their two surfaces. The paths follow the surface settings so you can see what each change does: the tint colours them, gain sets their strength, a surface turned off drops them (dashed red), and offset and scale move where they land on the sensor (dotted arrows).
   - **Surface** controls for the selected surface: **Makes ghosts** (off drops every ghost off it), **Gain**, **Tint**, **Offset X/Y** (in the node's pixels) and **Scale**. These are the node's Surfaces tab knobs, so the preview shows what the node will render. A ghost bounces off two surfaces, so both surfaces' settings combine (gains and tints multiply, offsets add, scales multiply). Changed surfaces are drawn in cyan, turned-off ones dashed red.
   - **Pick a Ghost**: Shift+click (or right-click) a ghost in the preview. The list shows which surfaces make the light there, brightest first; pick one to highlight that ghost and its two surfaces, then **Edit** either surface. **Highlight in the preview** dims the other ghosts (preview only).
-- **Start From a Look**: load a saved look's lens and settings as a starting point.
+- **Start From a Look**: load a saved look's lens and settings as a starting point, or **Delete Look** to remove one of your own looks.
 - **Apply to Node** sets the lens and look on the node the window was opened from (or the selected FlareSim node, or a new one). Ctrl+Z undoes it. With the same lens, only the surfaces you changed in the window are written, so tweaks made on the node's Surfaces tab are kept; a new lens or a look sets every surface. **Reload From Node** reads the node's lens, look and surface settings. **Save as Look...** keeps the settings, including changed surfaces, as a look.
 
 The preview runs on the CPU from the `flaresim_preview` library installed next to the plugins, so it works without a GPU and doesn't compete with the node. Without that library the window still works, minus the preview.
@@ -209,6 +209,7 @@ A look is a lens plus the settings that shape its flare: Flare Gain, aperture, s
 In the **Lens Browser**:
 - Pick a look under **Start From a Look**, click **Load Look**, adjust it, then click **Apply to Node**. Ctrl+Z undoes it.
 - Click **Save as Look...** to keep the window's lens and settings. Your looks go in `~/.nuke/FlareSim/looks/`. **Reload From Node** first if you want to save a node's tuned settings, including its highlight and spectral knobs.
+- Pick one of your own looks and click **Delete Look** to remove it (it asks first). Studio and starter looks can't be deleted from the window; if one of your looks had the same name as one of them, that look shows again after you delete yours.
 - Set `FLARESIM_LOOKS_PATH` to one or more shared folders to give a whole team the same looks.
 
 FlareSim ships a few starter looks in `looks/` as starting points.
