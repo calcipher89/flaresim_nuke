@@ -23,6 +23,7 @@ preview and thumbnails.  Thumbnails are cached in ~/.nuke/FlareSim/thumbnails.
 
 import ctypes
 import hashlib
+import math
 import os
 import re
 import sys
@@ -955,6 +956,111 @@ def surface_sag(radius, y):
     return radius - (1.0 if radius > 0 else -1.0) * (radius * radius - y * y) ** 0.5
 
 
+def section_radius(s):
+    """Radius of a surface in the side view (the YZ plane)."""
+    kind = s['surface_type']
+    if kind == 2:           # cylinder Y curves in XZ: flat from the side
+        return 0.0
+    if kind == 3:           # toric: radius_y is the YZ curvature
+        return s['radius_y']
+    return s['radius']
+
+
+def trace_side_view(surfaces, sensor_z, y0, slope, bounce=None):
+    """Trace a ray in the side view, as the node does (bounce = (a, b):
+    forward to b, reflect, back to a, reflect, forward to the sensor).
+
+    The ray enters at height y0 on the front surface with slope dy/dz.
+    Uses each surface's drawn aperture, so the path matches the diagram.
+    Returns the list of (z, y) points, ending on the sensor, or the points
+    reached before the ray left the lens (and False).
+    """
+    def ior_before(k):
+        return 1.0 if k <= 0 else surfaces[k - 1]['ior']
+
+    norm = (1.0 + slope * slope) ** -0.5
+    d = [norm, slope * norm]
+    first = surfaces[0]
+    lead = 10.0
+    p = [first['z'] - lead, y0 - slope * lead]
+    pts = [tuple(p)]
+
+    def hit(k, d):
+        s = surfaces[k]
+        R = s['section_radius']
+        if abs(R) < 1e-6:
+            if abs(d[0]) < 1e-9:
+                return None
+            t = (s['z'] - p[0]) / d[0]
+            h = [p[0] + t * d[0], p[1] + t * d[1]]
+            n = [-1.0, 0.0]
+        else:
+            c = s['z'] + R
+            oz, oy = p[0] - c, p[1]
+            b = oz * d[0] + oy * d[1]
+            cc = oz * oz + oy * oy - R * R
+            disc = b * b - cc
+            if disc < 0:
+                return None
+            t = None
+            for cand in (-b - disc ** 0.5, -b + disc ** 0.5):
+                hz = p[0] + cand * d[0]
+                if cand > 1e-6 and (hz - c) * R < 0:   # the cap near the vertex
+                    t = cand
+                    break
+            if t is None:
+                return None
+            h = [p[0] + t * d[0], p[1] + t * d[1]]
+            n = [(h[0] - c) / abs(R), h[1] / abs(R)]
+        if abs(h[1]) > s['draw_aperture'] * 1.001:
+            return None
+        if n[0] * d[0] + n[1] * d[1] > 0:
+            n = [-n[0], -n[1]]
+        return h, n
+
+    def refract(d, n, n1, n2):
+        eta = n1 / n2
+        cos_i = -(n[0] * d[0] + n[1] * d[1])
+        sin2_t = eta * eta * (1.0 - cos_i * cos_i)
+        if sin2_t > 1.0:
+            return None
+        k = eta * cos_i - (1.0 - sin2_t) ** 0.5
+        return [eta * d[0] + k * n[0], eta * d[1] + k * n[1]]
+
+    def reflect(d, n):
+        dn = d[0] * n[0] + d[1] * n[1]
+        return [d[0] - 2 * dn * n[0], d[1] - 2 * dn * n[1]]
+
+    a, b = bounce if bounce else (None, None)
+    steps = []
+    if bounce:
+        steps += [(k, 'fwd') for k in range(0, b)] + [(b, 'refl')]
+        steps += [(k, 'back') for k in range(b - 1, a, -1)] + [(a, 'refl')]
+        steps += [(k, 'fwd') for k in range(a + 1, len(surfaces))]
+    else:
+        steps = [(k, 'fwd') for k in range(len(surfaces))]
+    for k, mode in steps:
+        res = hit(k, d)
+        if res is None:
+            return pts, False
+        h, n = res
+        p[:] = h
+        pts.append(tuple(h))
+        if mode == 'refl':
+            d = reflect(d, n)
+        elif mode == 'fwd':
+            d = refract(d, n, ior_before(k), surfaces[k]['ior'])
+        else:
+            d = refract(d, n, surfaces[k]['ior'], ior_before(k))
+        if d is None:
+            return pts, False
+    if d[0] <= 1e-9:
+        return pts, False
+    t = (sensor_z - p[0]) / d[0]
+    pts.append((p[0] + t * d[0], p[1] + t * d[1]))
+    return pts, True
+
+
 class LensDiagram(QtWidgets.QWidget):
     """A side view of the lens: each surface as its curve, glass shaded,
     the iris marked.  Click a surface to select it."""
@@ -974,6 +1080,7 @@ class LensDiagram(QtWidgets.QWidget):
         self.ghost = None       # (a, b) of the picked ghost
         self.states = []        # per-surface settings, for changed / off marks
         self.message = ''
+        self.optics = None      # dict(slope, sensor_half_w, ref_width) from the window
         self._hover = -1
 
     def sizeHint(self):
@@ -982,6 +1089,8 @@ class LensDiagram(QtWidgets.QWidget):
     def set_lens(self, surfaces, sensor_z):
         self.surfaces, self.sensor_z = surfaces, sensor_z
         self.selected, self.ghost, self._hover = -1, None, -1
+        for s in self.surfaces:
+            s['section_radius'] = section_radius(s)
         self._fit_apertures()
         self.update()
 
@@ -996,7 +1105,7 @@ class LensDiagram(QtWidgets.QWidget):
             for k in range(len(surfs) - 1):
                 s0, s1 = surfs[k], surfs[k + 1]
                 a = min(f * s0['semi_aperture'], f * s1['semi_aperture'])
-                gap = (s1['z'] + surface_sag(s1['radius'], a)) - (s0['z'] + surface_sag(s0['radius'], a))
+                gap = (s1['z'] + surface_sag(s1['section_radius'], a)) - (s0['z'] + surface_sag(s0['section_radius'], a))
                 if gap < -0.05 * max(s1['z'] - s0['z'], 0.05):
                     return True
             return False
@@ -1006,15 +1115,15 @@ class LensDiagram(QtWidgets.QWidget):
             f *= 0.95
         for s in surfs:
             a = f * s['semi_aperture']
-            if abs(s['radius']) > 1e-6:
-                a = min(a, 0.98 * abs(s['radius']))
+            if abs(s['section_radius']) > 1e-6:
+                a = min(a, 0.98 * abs(s['section_radius']))
             s['draw_aperture'] = a
 
     # Mapping from lens space (z along the axis, y up, mm) to the widget.
     def _transform(self):
         if not self.surfaces:
             return None
-        z0 = min(s['z'] + min(0.0, surface_sag(s['radius'], s['draw_aperture']))
+        z0 = min(s['z'] + min(0.0, surface_sag(s['section_radius'], s['draw_aperture']))
                  for s in self.surfaces)
         z1 = max(self.sensor_z, max(s['z'] for s in self.surfaces))
         ymax = max(s['draw_aperture'] for s in self.surfaces) * 1.15 or 1.0
@@ -1031,7 +1140,7 @@ class LensDiagram(QtWidgets.QWidget):
         pts = []
         for i in range(steps + 1):
             y = -a + 2.0 * a * i / steps
-            z = s['z'] + surface_sag(s['radius'], y)
+            z = s['z'] + surface_sag(s['section_radius'], y)
             pts.append(QtCore.QPointF(ox + z * scale, oy - y * scale))
         return pts
 
@@ -1048,7 +1157,7 @@ class LensDiagram(QtWidgets.QWidget):
             if abs(ly) > a * 1.2:
                 continue
             ly = max(-a, min(a, ly))
-            sx = ox + (s['z'] + surface_sag(s['radius'], ly)) * scale
+            sx = ox + (s['z'] + surface_sag(s['section_radius'], ly)) * scale
             d = abs(sx - x)
             if d < best_d:
                 best, best_d = i, d
@@ -1120,6 +1229,8 @@ class LensDiagram(QtWidgets.QWidget):
             p.setBrush(QtCore.Qt.NoBrush)
             p.drawPolyline(QtGui.QPolygonF(curves[i]))
 
+        self._draw_light(p, tf)
+
         # Labels for the selected surface and the picked ghost's surfaces.
         p.setPen(QtGui.QColor(220, 220, 220))
         marks = {}
@@ -1136,8 +1247,77 @@ class LensDiagram(QtWidgets.QWidget):
 
         p.setPen(QtGui.QColor(130, 130, 130))
         p.drawText(self.rect().adjusted(8, 0, -8, -4), QtCore.Qt.AlignBottom | QtCore.Qt.AlignLeft,
-                   'Click a surface to edit it.')
+                   'Click a surface to edit it. Esc deselects.')
         p.end()
+
+    def _ghost_pairs(self):
+        """The ghosts to draw: the picked one, else every ghost off the
+        selected surface."""
+        if self.ghost is not None:
+            return [tuple(sorted(self.ghost))], True
+        i = self.selected
+        if i < 0:
+            return [], False
+        pairs = []
+        for j in range(len(self.surfaces)):
+            if j == i or self.surfaces[j]['is_stop'] or self.surfaces[i]['is_stop']:
+                continue
+            pairs.append((min(i, j), max(i, j)))
+        return pairs, False
+
+    def _draw_light(self, p, tf):
+        """Light paths through the lens: the image-forming ray, faint, and
+        the ghosts of the selection, drawn with their surfaces' settings so
+        each change shows: the tint colours the path, gain sets its
+        strength, a surface turned off drops it, and offset and scale move
+        where it lands on the sensor (arrows)."""
+        if self.optics is None:
+            return
+        scale, ox, oy = tf
+        slope = self.optics['slope']
+        to_px = lambda pt: QtCore.QPointF(ox + pt[0] * scale, oy - pt[1] * scale)
+        front = self.surfaces[0]['draw_aperture']
+
+        pts, ok = trace_side_view(self.surfaces, self.sensor_z, 0.0, slope)
+        if len(pts) > 1:
+            p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 60), 1))
+            p.drawPolyline(QtGui.QPolygonF([to_px(q) for q in pts]))
+
+        pairs, bold = self._ghost_pairs()
+        heights = (-0.5, 0.0, 0.5) if bold else (0.0,)
+        for a, b in pairs:
+            st = [self.states[k] if k < len(self.states) else SURF_DEFAULT for k in (a, b)]
+            on = st[0]['enabled'] and st[1]['enabled']
+            gain = st[0]['gain'] * st[1]['gain']
+            tint = [st[0]['color'][c] * st[1]['color'][c] for c in range(3)]
+            peak = max(max(tint), 1e-6)
+            colour = QtGui.QColor.fromRgbF(*[min(1.0, 0.25 + 0.75 * t / peak) for t in tint])
+            if on:
+                strength = min(1.0, 0.25 + 0.75 * min(gain, 2.0) / 2.0) if gain > 0 else 0.08
+                colour.setAlphaF((0.9 if bold else 0.55) * strength)
+                width = (1.6 if bold else 1.0) * (0.6 + 0.4 * min(gain, 3.0))
+                pen = QtGui.QPen(colour, width)
+            else:
+                pen = QtGui.QPen(QtGui.QColor(170, 70, 70, 140), 1, QtCore.Qt.DashLine)
+            off_mm = (st[0]['offy'] + st[1]['offy']) / float(max(self.optics['ref_width'], 1)) \
+                * 2.0 * self.optics['sensor_half_w']
+            sc = st[0]['scale'] * st[1]['scale']
+            for y0 in heights:
+                pts, ok = trace_side_view(self.surfaces, self.sensor_z, y0 * front, slope, (a, b))
+                if len(pts) < 2:
+                    continue
+                p.setPen(pen)
+                p.drawPolyline(QtGui.QPolygonF([to_px(q) for q in pts]))
+                if not (ok and on):
+                    continue
+                z, y = pts[-1]
+                moved = (z, y * sc + off_mm)
+                p.setBrush(colour)
+                p.drawEllipse(to_px(moved), 2.5, 2.5)
+                if abs(moved[1] - y) * scale > 2.0:
+                    p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 150), 1, QtCore.Qt.DotLine))
+                    p.drawLine(to_px((z, y)), to_px(moved))
+                p.setBrush(QtCore.Qt.NoBrush)
 
     def mouseMoveEvent(self, event):
         pos = event.position() if hasattr(event, 'position') else event.pos()
@@ -1156,9 +1336,9 @@ class LensDiagram(QtWidgets.QWidget):
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             pos = event.position() if hasattr(event, 'position') else event.pos()
+            # Clicking empty space, or the selected surface again, deselects.
             i = self.surface_at(pos.x(), pos.y())
-            if i >= 0:
-                self.surfaceClicked.emit(i)
+            self.surfaceClicked.emit(-1 if i == self.selected else i)
 
 
 def surface_description(s, i):
@@ -1493,6 +1673,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.tabs.currentChanged.connect(self._schedule_render)
 
         QShortcut(QtGui.QKeySequence('Ctrl+F'), self, self.search.setFocus)
+        QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, lambda: self._select_surface(-1))
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_PageUp), self,
                             lambda: self._step_lens(-1))
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_PageDown), self,
@@ -2268,11 +2449,25 @@ class LensBrowserWindow(QtWidgets.QWidget):
             return
         self._renderer.request(self._render_request())
 
+    def _update_diagram_optics(self, w, h):
+        """Give the lens diagram the preview light's angle, so its light
+        paths follow the light."""
+        _u, v = self.view.source
+        tan_half_h = math.tan(math.radians(min(max(self.fov.value(), 1.0), 170.0)) * 0.5)
+        tan_half_v = tan_half_h * h / float(max(w, 1))
+        info = self._lens_info()
+        focal = info.focal if info is not None and info.focal > 0 else 50.0
+        self.diagram.optics = {'slope': (0.5 - v) * 2.0 * tan_half_v,
+                               'sensor_half_w': focal * tan_half_h,
+                               'ref_width': self._ref_width}
+        self.diagram.update()
+
     def _render_request(self):
         w, h = self.view.render_size()
         u, v = self.view.source
         c = self._source_colour
         _label, grid, passes = QUALITY[self.quality.currentIndex()]
+        self._update_diagram_optics(w, h)
         return {
             'lens': self._lens_path,
             'surfaces': self._packed_surfaces(),
