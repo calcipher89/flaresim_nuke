@@ -206,32 +206,42 @@ else()
     #   sm_100 Blackwell    (B100/B200)              CUDA 12.8+
     #   sm_120 Blackwell    (RTX 5000)               CUDA 12.8+
     #
-    # When not given, the list is chosen from the nvcc version below.
-    # CMake fills CMAKE_CUDA_ARCHITECTURES with a default inside
-    # enable_language(CUDA), so remember whether the user passed it first.
+    # When not given, the list is chosen from the nvcc version below and
+    # written to the cache, so CMake re-runs keep it.  enable_language(CUDA)
+    # would otherwise cache nvcc's own default (sm_52) on the first run, so
+    # remember what the user passed before it runs.
     set(_user_cuda_archs "${CMAKE_CUDA_ARCHITECTURES}")
+    if(_user_cuda_archs STREQUAL "${_FLARESIM_AUTO_CUDA_ARCHS}")
+        set(_user_cuda_archs "")   # our own earlier pick, not the user's
+    endif()
 
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
     if(_user_cuda_archs)
-        set(CMAKE_CUDA_ARCHITECTURES ${_user_cuda_archs})
+        set(_archs ${_user_cuda_archs})
     elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-        set(CMAKE_CUDA_ARCHITECTURES 70 75 86 89 90 100 120)
+        set(_archs 70 75 86 89 90 100 120)
     elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
-        set(CMAKE_CUDA_ARCHITECTURES 70 75 86 89 90)
+        set(_archs 70 75 86 89 90)
     elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.8)
-        set(CMAKE_CUDA_ARCHITECTURES 70 75 86 89)
+        set(_archs 70 75 86 89)
     else()
-        set(CMAKE_CUDA_ARCHITECTURES 70 75 86)
+        set(_archs 70 75 86)
+    endif()
+    set(CMAKE_CUDA_ARCHITECTURES "${_archs}" CACHE STRING "CUDA architectures to build for" FORCE)
+    if(NOT _user_cuda_archs)
+        set(_FLARESIM_AUTO_CUDA_ARCHS "${_archs}" CACHE INTERNAL "")
     endif()
 
     foreach(_arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
         string(REGEX MATCH "^[0-9]+" _num "${_arch}")
         if(_num LESS 70)
             message(FATAL_ERROR
-                "FlareSim requires sm_70+ (Volta or newer); sm_${_arch} is not supported.")
+                "FlareSim requires sm_70+ (Volta or newer); sm_${_arch} is not supported.\n"
+                "  Pass -DCMAKE_CUDA_ARCHITECTURES=\"86;89\" (or similar), or delete the\n"
+                "  build folder to let FlareSim pick the list from your CUDA version.")
         endif()
     endforeach()
 
