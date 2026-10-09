@@ -1551,7 +1551,14 @@ class LensBrowserWindow(QtWidgets.QWidget):
         load_look = QtWidgets.QPushButton('Load Look')
         load_look.setToolTip('Load the look\'s lens and settings into this window.')
         load_look.clicked.connect(self._load_look)
-        lk.addWidget(load_look)
+        self.delete_look_btn = QtWidgets.QPushButton('Delete Look')
+        self.delete_look_btn.setToolTip('Delete this look from your own looks folder. '
+                                        'Studio and starter looks cannot be deleted here.')
+        self.delete_look_btn.clicked.connect(self._delete_look)
+        look_btns = QtWidgets.QHBoxLayout()
+        look_btns.addWidget(load_look)
+        look_btns.addWidget(self.delete_look_btn)
+        lk.addLayout(look_btns)
         lv.addWidget(look_box)
         lv.addStretch(1)
 
@@ -2212,8 +2219,36 @@ class LensBrowserWindow(QtWidgets.QWidget):
             if look.get('lens'):
                 text += ('\n' if text else '') + 'Lens: %s' % _breakable(os.path.basename(look['lens']))
             self.look_desc.setText(text)
+            mine = FlareSim_Looks.can_delete(look)
+            self.delete_look_btn.setEnabled(mine)
+            self.delete_look_btn.setToolTip(
+                'Delete this look from your own looks folder.' if mine else
+                'This is a %s look, so it cannot be deleted here.' % look['_source'].lower())
         else:
             self.look_desc.setText('No looks found.')
+            self.delete_look_btn.setEnabled(False)
+
+    def _delete_look(self):
+        i = self.look_combo.currentIndex()
+        if not 0 <= i < len(self._looks):
+            return
+        look = self._looks[i]
+        if not FlareSim_Looks.can_delete(look):
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, 'Delete Look', 'Delete the look "%s"?\n\nThis removes %s and cannot be undone.'
+            % (look['name'], look['_path']))
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            FlareSim_Looks.delete_look(look)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, 'Delete Look', 'Could not delete the look:\n%s' % e)
+            return
+        if self._look_name.lower() == look['name'].lower():
+            self._look_name = ''
+        nuke.tprint('FlareSim: deleted look %s' % look['_path'])
+        self._refresh_looks()
 
     def _load_look(self):
         i = self.look_combo.currentIndex()
