@@ -3,8 +3,9 @@ FlareSim_LensBrowser.py — the FlareSim Lens Browser window.
 
 A standalone Qt window for picking a lens and building a flare look:
 
-  * a grid of lens thumbnails, each a small render of that lens's flare,
-    with search, maker, focal length, speed and type filters
+  * lens thumbnails under the preview, each a small render of that lens's
+    flare, with search, maker, focal length, speed and type filters; drag
+    the divider to go from a one-row carousel to a grid
   * a live flare preview: drag the light around to see the ghosts move
   * look controls (gain, aperture, ghost blur) that drive the preview
   * start from a saved look, apply the result to a FlareSim node, or save it
@@ -584,6 +585,17 @@ class PreviewView(QtWidgets.QWidget):
         self.sourceMoved.emit(self.source[0], self.source[1], False)
 
 
+class LensStrip(QtWidgets.QListWidget):
+    """The lens thumbnails.  Emits resized so the window can switch between
+    a one-row carousel and a wrapping grid as the strip is dragged taller."""
+
+    resized = QtCore.Signal()
+
+    def resizeEvent(self, event):
+        super(LensStrip, self).resizeEvent(event)
+        self.resized.emit()
+
+
 class LensTileDelegate(QtWidgets.QStyledItemDelegate):
     """Draws a lens tile: the thumbnail, then the name and its focal length
     and speed on one line each, elided to fit."""
@@ -757,6 +769,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._refresh_timer.setInterval(30)
         self._refresh_timer.timeout.connect(self._request_render)
 
+        self._restore_layout()
         self._apply_filters()
         self._refresh_looks()
 
@@ -768,17 +781,15 @@ class LensBrowserWindow(QtWidgets.QWidget):
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root.addWidget(splitter)
 
-        # Left: lens thumbnails above the live preview.
-        left = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-
-        browse = QtWidgets.QWidget()
-        bv = QtWidgets.QVBoxLayout(browse)
-        bv.setContentsMargins(0, 0, 0, 4)
-        filters = QtWidgets.QHBoxLayout()
+        # Left: find a lens, lens info, looks.
+        left = QtWidgets.QWidget()
+        lv = QtWidgets.QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 4, 0)
+        find_box = QtWidgets.QGroupBox('Find a Lens')
+        filters = QtWidgets.QFormLayout(find_box)
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Search lenses (name, maker, 50mm, f/1.4...)')
         self.search.setClearButtonEnabled(True)
-        self.search.setMinimumWidth(180)
         self.type_combo = QtWidgets.QComboBox()
         self.type_combo.addItems(TYPES)
         self.maker_combo = QtWidgets.QComboBox()
@@ -799,16 +810,18 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.size_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.size_slider.setRange(50, 150)
         self.size_slider.setValue(75)
-        self.size_slider.setFixedWidth(90)
-        self.size_slider.setToolTip('Thumbnail size')
-        filters.addWidget(self.search, 1)
-        for combo in (self.type_combo, self.maker_combo, self.focal_combo, self.speed_combo):
-            filters.addWidget(combo)
-        filters.addWidget(self.count_label)
-        filters.addWidget(self.size_slider)
-        bv.addLayout(filters)
+        self.size_slider.setToolTip('Thumbnail size when the lens strip shows more than '
+                                    'one row. A single row fills the strip.')
+        filters.addRow(self.search)
+        filters.addRow('Type', self.type_combo)
+        filters.addRow('Maker', self.maker_combo)
+        filters.addRow('Focal', self.focal_combo)
+        filters.addRow('Speed', self.speed_combo)
+        filters.addRow('Tile size', self.size_slider)
+        filters.addRow(self.count_label)
+        lv.addWidget(find_box)
 
-        self.grid = QtWidgets.QListWidget()
+        self.grid = LensStrip()
         self.grid.setViewMode(QtWidgets.QListView.IconMode)
         self.grid.setResizeMode(QtWidgets.QListView.Adjust)
         self.grid.setMovement(QtWidgets.QListView.Static)
@@ -828,9 +841,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                                                 os.path.basename(l.path)))
             self.grid.addItem(item)
             self._items[l.path] = item
-        self._set_thumb_size(self.size_slider.value())
-        bv.addWidget(self.grid, 1)
-        left.addWidget(browse)
+        self.grid.setMinimumHeight(90)
 
         centre = QtWidgets.QWidget()
         cv = QtWidgets.QVBoxLayout(centre)
@@ -853,11 +864,19 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.clear_bg_btn.clicked.connect(self._clear_background)
         under.addWidget(self.clear_bg_btn)
         cv.addLayout(under)
-        left.addWidget(centre)
-        left.setStretchFactor(0, 1)
-        left.setStretchFactor(1, 1)
-        left.setSizes([380, 380])
+
+        # Centre: the live preview over the lens strip.  Drag the divider:
+        # a short strip is a one-row carousel, a taller one wraps into a grid.
+        self.view_split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        self.view_split.addWidget(centre)
+        self.view_split.addWidget(self.grid)
+        self.view_split.setCollapsible(0, False)
+        self.view_split.setCollapsible(1, False)
+        self.view_split.setStretchFactor(0, 1)
+        self.view_split.setStretchFactor(1, 0)
+        self.view_split.setSizes([620, 200])
         splitter.addWidget(left)
+        splitter.addWidget(self.view_split)
 
         # Right: look controls and actions.
         right = QtWidgets.QWidget()
@@ -873,7 +892,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         open_btn = QtWidgets.QPushButton('Open .lens File...')
         open_btn.clicked.connect(self._browse_lens_file)
         lg.addWidget(open_btn)
-        rv.addWidget(lens_box)
+        lv.addWidget(lens_box)
 
         look_box = QtWidgets.QGroupBox('Start From a Look')
         lk = QtWidgets.QVBoxLayout(look_box)
@@ -887,7 +906,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
         load_look.setToolTip('Load the look\'s lens and settings into this window.')
         load_look.clicked.connect(self._load_look)
         lk.addWidget(load_look)
-        rv.addWidget(look_box)
+        lv.addWidget(look_box)
+        lv.addStretch(1)
 
         flare_box = QtWidgets.QGroupBox('Flare Look')
         fl = QtWidgets.QFormLayout(flare_box)
@@ -964,10 +984,14 @@ class LensBrowserWindow(QtWidgets.QWidget):
                                scroll.verticalScrollBar().sizeHint().width() + 4)
         scroll.setMaximumWidth(scroll.minimumWidth() + 120)
         self.exposure.setMinimumWidth(160)
-        splitter.setCollapsible(0, False)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
-        splitter.setSizes([1000, 330])
+        left.setMinimumWidth(260)
+        left.setMaximumWidth(400)
+        splitter.setCollapsible(1, False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([300, 900, 330])
+        self.main_split = splitter
 
         # Signals.
         self.search.textChanged.connect(self._apply_filters)
@@ -977,7 +1001,10 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.grid.itemDoubleClicked.connect(lambda _item: self._apply_to_node())
         self.grid.verticalScrollBar().valueChanged.connect(
             lambda _v: self._thumb_timer.start())
-        self.size_slider.valueChanged.connect(self._set_thumb_size)
+        self.grid.horizontalScrollBar().valueChanged.connect(
+            lambda _v: self._thumb_timer.start())
+        self.size_slider.valueChanged.connect(self._layout_strip)
+        self.grid.resized.connect(self._layout_strip)
         self.look_combo.currentIndexChanged.connect(self._show_look_info)
         for row in (self.gain, self.blades, self.rotation, self.blur, self.blur_passes,
                     self.intensity, self.fov, self.exposure):
@@ -1007,12 +1034,37 @@ class LensBrowserWindow(QtWidgets.QWidget):
             bits.append('f/%g' % l.fnum)
         return '  '.join(bits) or l.maker
 
-    def _set_thumb_size(self, percent):
-        w = int(THUMB_SIZE[0] * percent / 100.0)
-        h = int(THUMB_SIZE[1] * percent / 100.0)
-        self.grid.setIconSize(QtCore.QSize(w, h))
-        line = self.grid.fontMetrics().height()
-        self.grid.setGridSize(QtCore.QSize(w + 14, h + 2 * line + 16))
+    def _layout_strip(self, *_args):
+        """Fit the tiles to the lens strip: one row of tiles as tall as the
+        strip allows (a carousel), or, once two rows of slider-sized tiles fit,
+        a wrapping grid of those."""
+        g = self.grid
+        line = g.fontMetrics().height()
+        text_h = 2 * line + 16
+        aspect = THUMB_SIZE[0] / float(THUMB_SIZE[1])
+        avail = g.height() - 2 * g.frameWidth() - 4
+        tile_h = int(THUMB_SIZE[1] * self.size_slider.value() / 100.0)
+        if avail >= 2 * (tile_h + text_h):
+            wrap = True
+        else:
+            wrap = False
+            bar = g.horizontalScrollBar().sizeHint().height()
+            tile_h = max(40, min(int(THUMB_SIZE[1] * 1.6), avail - bar - text_h))
+        tile_w = int(tile_h * aspect)
+        if g.isWrapping() != wrap or g.flow() != (QtWidgets.QListView.LeftToRight):
+            g.setFlow(QtWidgets.QListView.LeftToRight)
+            g.setWrapping(wrap)
+            g.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff if wrap
+                                           else QtCore.Qt.ScrollBarAsNeeded)
+            g.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded if wrap
+                                         else QtCore.Qt.ScrollBarAlwaysOff)
+        size = QtCore.QSize(tile_w, tile_h)
+        if g.iconSize() != size:
+            g.setIconSize(size)
+            g.setGridSize(QtCore.QSize(tile_w + 14, tile_h + text_h))
+        current = g.currentItem()
+        if current is not None:
+            g.scrollToItem(current)
         if hasattr(self, '_thumb_timer'):   # not yet while building the UI
             self._thumb_timer.start()
 
@@ -1443,8 +1495,28 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if hasattr(self, '_thumb_timer'):
             self._thumb_timer.start()
 
+    def _settings(self):
+        return QtCore.QSettings('FlareSim', 'LensBrowser')
+
+    def _restore_layout(self):
+        """Window size and divider positions from the last session."""
+        st = self._settings()
+        for key, restore in (('geometry', self.restoreGeometry),
+                             ('main_split', self.main_split.restoreState),
+                             ('view_split', self.view_split.restoreState)):
+            value = st.value(key)
+            if value is not None:
+                restore(value)
+
+    def _save_layout(self):
+        st = self._settings()
+        st.setValue('geometry', self.saveGeometry())
+        st.setValue('main_split', self.main_split.saveState())
+        st.setValue('view_split', self.view_split.saveState())
+
     def closeEvent(self, event):
         global _window
+        self._save_layout()
         if self._renderer is not None:
             self._renderer.stop()
             self._renderer = None
