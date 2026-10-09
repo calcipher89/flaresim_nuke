@@ -81,11 +81,8 @@ if(FLARESIM_BUILD_TESTS)
     enable_testing()
     add_executable(flaresim_smoke src/smoke.cpp src/lens.cpp src/trace.cpp)
     target_include_directories(flaresim_smoke PRIVATE src)
-    # The test is built from assert(); keep them live in Release builds.
-    if(MSVC)
-        target_compile_options(flaresim_smoke PRIVATE /UNDEBUG)
-    else()
-        target_compile_options(flaresim_smoke PRIVATE -UNDEBUG -Wall -Wno-deprecated-declarations)
+    if(NOT MSVC)
+        target_compile_options(flaresim_smoke PRIVATE -Wall -Wno-deprecated-declarations)
     endif()
     add_test(NAME optics_smoke COMMAND flaresim_smoke)
 endif()
@@ -275,8 +272,10 @@ else()
                 $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wno-deprecated-declarations>)
         endif()
 
-        # Allow constexpr on device without __device__ tags.
-        target_compile_options(${_tgt} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+        # Allow constexpr on device without __device__ tags; sm_70 is still
+        # supported on purpose, so silence nvcc's deprecation notice for it.
+        target_compile_options(${_tgt} PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr -Wno-deprecated-gpu-targets>)
         set_target_properties(${_tgt} PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
     endforeach()
 

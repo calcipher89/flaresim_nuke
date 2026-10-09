@@ -33,6 +33,15 @@
 #include <vector>
 #include <algorithm>
 
+// Export host-callable entry points from the shared library.  GCC/Clang need
+// default visibility; on Windows the build exports all symbols already
+// (CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS), and MSVC rejects __attribute__.
+#if defined(_WIN32)
+#define FLARESIM_EXPORT
+#else
+#define FLARESIM_EXPORT __attribute__((visibility("default")))
+#endif
+
 
 
 // ===========================================================================
@@ -85,7 +94,7 @@ void GpuBufferCache::release()
 // Explicit visibility ensures the symbol is exported in the shared library.
 // ---------------------------------------------------------------------------
 
-__attribute__((visibility("default")))
+FLARESIM_EXPORT
 void* ensure_pinned_output_fp16(GpuBufferCache& cache, std::size_t n_px)
 {
     if (n_px <= cache.h_pinned_elems && cache.h_pinned)
@@ -114,7 +123,7 @@ void* ensure_pinned_output_fp16(GpuBufferCache& cache, std::size_t n_px)
 // Same pinned buffer slot, but 4× the size (float vs uint16_t).
 // ---------------------------------------------------------------------------
 
-__attribute__((visibility("default")))
+FLARESIM_EXPORT
 void* ensure_pinned_output_fp32(GpuBufferCache& cache, std::size_t n_px)
 {
     // FP32 needs 4 channels × n_px × sizeof(float) = 4× the FP16 size.
@@ -153,7 +162,7 @@ void* ensure_pinned_output_fp32(GpuBufferCache& cache, std::size_t n_px)
 // Uses CUDA's __half2float which nvcc compiles to efficient host code.
 // ---------------------------------------------------------------------------
 
-__attribute__((visibility("default")))
+FLARESIM_EXPORT
 void convert_fp16_scanline(const void* src, float* dst, int n)
 {
     const __half* h = static_cast<const __half*>(src);

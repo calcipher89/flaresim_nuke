@@ -12,6 +12,8 @@
 #include "trace.h"
 #include "lens.h"
 
+// The checks are assert()s: keep them live in Release builds too.
+#undef NDEBUG
 #include <cassert>
 #include <cmath>
 #include <cstdio>
