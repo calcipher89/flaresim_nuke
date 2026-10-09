@@ -225,6 +225,8 @@ public:
     float       outside_source_color_[3];
     float       outside_source_intensity_;
     float       outside_source_falloff_;   // blend zone in pixels at frame edge
+    float       light_color_[3];          // Light Colour
+    bool        color_from_plate_;        // tint the light by the plate
     int         matte_mode_;               // flaresim::MatteMode
     float       light_size_;               // matte disc diameter, pixels
 
@@ -361,6 +363,8 @@ public:
     {
         manual_xy_[0] = 960.0;  // sensible default (centre of 1920 frame)
         manual_xy_[1] = 540.0;
+        light_color_[0] = light_color_[1] = light_color_[2] = 1.0f;
+        color_from_plate_ = false;
         outside_source_color_[0] = 1.0f;
         outside_source_color_[1] = 1.0f;
         outside_source_color_[2] = 1.0f;
@@ -553,21 +557,36 @@ public:
         };
         Enumeration_knob(f, &source_mode_, kSourceModes, "source_mode", "Source Mode");
         Tooltip(f, "How bright sources are located in the input:\n"
-                   "Manual XY: a single source at the XY knob below (track a light "
-                     "source manually or link to a Tracker).\n"
+                   "Manual XY: place the light yourself at Source XY, with its "
+                     "own Light Colour and Source Intensity.  It always flares, "
+                     "whatever the plate looks like there (track it or link it "
+                     "to a Tracker).\n"
                    "Auto Detect: scan input 0's RGB and emit a source for every "
                      "region above the Threshold.  Downsample controls block size "
                      "and Max Sources caps the total count.");
 
         XY_knob(f, manual_xy_, "manual_xy", "Source XY");
-        Tooltip(f, "Pixel position of the flare source.  Animatable — link to a "
-                   "Tracker node's tracking output for stabilised flares.\n\n"
-                   "The input image is sampled at this position: if the brightness "
-                   "exceeds Threshold a flare is produced; otherwise the output is black.");
+        Tooltip(f, "Position of the light.  The flare always comes from here, "
+                   "even off screen.  Animatable — link to a Tracker node's "
+                   "tracking output for stabilised flares.");
+        Color_knob(f, light_color_, "light_color", "Light Colour");
+        Tooltip(f, "Colour of the light.  White (default) gives a neutral flare; "
+                   "Source Intensity sets how bright it is.");
+        Bool_knob(f, &color_from_plate_, "color_from_plate", "Colour From Plate");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Tint the light with the plate's colour at the light, averaged "
+                   "over Sample Radius, so the flare picks up the colour (and "
+                   "brightness) of the light it sits on.  Off by default.  "
+                   "Off screen the light keeps its Light Colour.");
         Int_knob(f, &manual_sample_radius_, "manual_sample_radius", "Sample Radius");
-        Tooltip(f, "Radius (in pixels) of the area averaged around Source XY to "
-                   "determine source colour and brightness.  Larger values are more "
-                   "robust to sub-pixel tracking jitter.  Default 4.");
+        Tooltip(f, "With Colour From Plate: radius (in pixels) of the area "
+                   "averaged around Source XY for the light's colour.  Larger "
+                   "values are more robust to sub-pixel tracking jitter.  Default 4.");
+        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Blend (px)");
+        SetRange(f, 0.0, 200.0);
+        Tooltip(f, "With Colour From Plate: blend zone in pixels at the frame "
+                   "edge, where the plate colour fades to the plain Light Colour "
+                   "as the light leaves the frame.  0 = hard switch.");
         Float_knob(f, &source_intensity_,  "source_intensity",  "Source Intensity");
         SetRange(f, 1.0, 50.0);
         Tooltip(f, "How bright the light source is relative to the plate.\n\n"
@@ -580,7 +599,6 @@ public:
                    "0 = always produce a flare (any non-black pixel).  "
                    "0.5 = only above mid-grey.  1 = only pure white.\n"
                    "Default 0.\n\n"
-                   "In Manual XY mode, gates the single sampled source.  "
                    "In Auto Detect mode, gates each downsampled block.");
 
         Divider(f, "Source Extraction");
@@ -606,7 +624,7 @@ public:
                    "out smoothly as it slides behind an edge.\n"
                    "Mask: white lets the light through; only lights inside the "
                    "white area flare.\n"
-                   "Lights outside the frame (Outside Source) are not affected.\n\nAuto Detect: each detected light is dimmed by the matte at its own spot.");
+                   "Lights outside the frame are not affected.\n\nAuto Detect: each detected light is dimmed by the matte at its own spot.");
         Float_knob(f, &light_size_, "light_size", "Light Size");
         SetRange(f, 1.0, 100.0);
         Tooltip(f, "Diameter in pixels of the light as the matte sees it.  The "
@@ -614,24 +632,14 @@ public:
                    "Bigger = a slower fade as the light passes an edge.  "
                    "Default 8.");
 
-        Divider(f, "Outside Source");
+        // Kept (hidden) so older scripts load: the light now always flares
+        // off screen with its own colour.
         Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
-        Tooltip(f, "When the Source XY is outside the frame, use the colour "
-                   "and intensity below instead of sampling the image.  "
-                   "The flare keeps rendering seamlessly as the source "
-                   "leaves or re-enters the plate.");
+        SetFlags(f, Knob::HIDDEN);
         Color_knob(f, outside_source_color_, "outside_source_color", "Outside Color");
-        SetFlags(f, Knob::STARTLINE);
-        Tooltip(f, "RGB colour of the off-screen light source.  "
-                   "White (1, 1, 1) gives a neutral flare.");
+        SetFlags(f, Knob::HIDDEN);
         Float_knob(f, &outside_source_intensity_, "outside_source_intensity", "Outside Intensity");
-        SetRange(f, 0.0, 50.0);
-        Tooltip(f, "Intensity of the off-screen source (same scale as Source Intensity).");
-        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Falloff (px)");
-        SetRange(f, 0.0, 200.0);
-        Tooltip(f, "Blend zone in pixels at the frame edge.  0 = hard switch "
-                   "(the image-sampled colour pops to outside colour instantly).  "
-                   "Higher values smoothly interpolate between the two near the edge.");
+        SetFlags(f, Knob::HIDDEN);
 
         Divider(f, "Camera");
         Bool_knob(f, &fov_use_sensor_, "fov_use_sensor", "Use Sensor Size");
@@ -785,14 +793,13 @@ public:
             const bool is_auto   = (source_mode_ == 1);
             // Manual XY-only controls
             if (Knob* x = knob("manual_xy"))                x->enable(is_manual);
-            if (Knob* x = knob("manual_sample_radius"))     x->enable(is_manual);
-            // Outside Source is meaningless in Auto Detect mode — the plate
-            // itself already defines which regions flare.
-            if (Knob* x = knob("outside_source_enable"))    x->enable(is_manual);
-            if (Knob* x = knob("outside_source_color"))     x->enable(is_manual);
-            if (Knob* x = knob("outside_source_intensity")) x->enable(is_manual);
-            if (Knob* x = knob("outside_source_falloff"))   x->enable(is_manual);
+            if (Knob* x = knob("light_color"))              x->enable(is_manual);
+            if (Knob* x = knob("color_from_plate"))         x->enable(is_manual);
+            const bool plate = is_manual && color_from_plate_;
+            if (Knob* x = knob("manual_sample_radius"))     x->enable(plate);
+            if (Knob* x = knob("outside_source_falloff"))   x->enable(plate);
             // Auto Detect-only controls
+            if (Knob* x = knob("threshold"))         x->enable(is_auto);
             if (Knob* x = knob("source_downsample")) x->enable(is_auto);
             if (Knob* x = knob("max_sources"))       x->enable(is_auto);
         };
@@ -801,7 +808,7 @@ public:
             update_lens_button_label();
             // fall through — other handlers don't care about showPanel
         }
-        if (k->is("source_mode")) {
+        if (k->is("source_mode") || k->is("color_from_plate")) {
             sync_source_mode_enabled();
             return 1;
         }
@@ -1055,11 +1062,16 @@ public:
 
         const bool source_on_screen = (dist_inside > 0.0f);
 
-        // ---- Sample image colour (when source is on screen) ----
-        float img_r = 0, img_g = 0, img_b = 0;
-        bool  have_image_sample = false;
+        // ---- The light: its own colour, optionally tinted by the plate ----
+        // Source XY is the light itself, so it always flares (on screen or
+        // off); Threshold only applies to Auto Detect.
+        const float si = source_intensity_ * 1000.0f;
+        float final_r = light_color_[0] * si;
+        float final_g = light_color_[1] * si;
+        float final_b = light_color_[2] * si;
+        bool  emit_source = true;
 
-        if (source_on_screen && sx0 < sx1 && sy0 < sy1)
+        if (color_from_plate_ && source_on_screen && sx0 < sx1 && sy0 < sy1)
         {
             float sum_r = 0, sum_g = 0, sum_b = 0;
             int   cnt   = 0;
@@ -1073,67 +1085,25 @@ public:
                 const float* bp = sample_row[Chan_Blue];
                 for (int ix = sx0; ix < sx1; ++ix)
                 {
-                    sum_r += rp[ix];
-                    sum_g += gp[ix];
-                    sum_b += bp[ix];
-                    ++cnt;
+                    sum_r += rp[ix]; sum_g += gp[ix]; sum_b += bp[ix]; ++cnt;
                 }
             }
             if (cnt > 0) {
-                img_r = sum_r / cnt;
-                img_g = sum_g / cnt;
-                img_b = sum_b / cnt;
-                float luma = 0.2126f * img_r + 0.7152f * img_g + 0.0722f * img_b;
-                have_image_sample = (luma >= threshold_);
+                const float pr = sum_r / cnt * final_r;
+                const float pg = sum_g / cnt * final_g;
+                const float pb = sum_b / cnt * final_b;
+                // Near the frame edge, blend from the plate's colour to the plain
+                // light colour, which is all the light has once it leaves.
+                const float falloff = std::max(outside_source_falloff_, 0.0f);
+                const float t = (falloff > 0.0f && dist_inside < falloff)
+                                ? std::clamp(dist_inside / falloff, 0.0f, 1.0f) : 1.0f;
+                final_r = t * pr + (1.0f - t) * final_r;
+                final_g = t * pg + (1.0f - t) * final_g;
+                final_b = t * pb + (1.0f - t) * final_b;
             }
         }
 
-        // ---- Build the source, blending with outside colour if needed ----
         {
-            // Outside source values (always computed so we can blend)
-            const float out_si = outside_source_intensity_ * 1000.0f;
-            const float out_r = outside_source_color_[0] * out_si;
-            const float out_g = outside_source_color_[1] * out_si;
-            const float out_b = outside_source_color_[2] * out_si;
-
-            float final_r, final_g, final_b;
-            bool  emit_source = false;
-
-            if (have_image_sample && !outside_source_enable_) {
-                // Normal behaviour, no outside source feature
-                const float si = source_intensity_ * 1000.0f;
-                final_r = img_r * si;
-                final_g = img_g * si;
-                final_b = img_b * si;
-                emit_source = true;
-            }
-            else if (have_image_sample && outside_source_enable_) {
-                // Source is on-screen. Check if we're in the falloff zone.
-                const float falloff = std::max(outside_source_falloff_, 0.0f);
-                if (falloff > 0.0f && dist_inside < falloff) {
-                    // Inside the blend zone: lerp between image and outside
-                    const float t = std::clamp(dist_inside / falloff, 0.0f, 1.0f);
-                    const float si = source_intensity_ * 1000.0f;
-                    final_r = t * (img_r * si) + (1.0f - t) * out_r;
-                    final_g = t * (img_g * si) + (1.0f - t) * out_g;
-                    final_b = t * (img_b * si) + (1.0f - t) * out_b;
-                } else {
-                    // Fully on-screen, outside falloff zone — normal image sample
-                    const float si = source_intensity_ * 1000.0f;
-                    final_r = img_r * si;
-                    final_g = img_g * si;
-                    final_b = img_b * si;
-                }
-                emit_source = true;
-            }
-            else if (!source_on_screen && outside_source_enable_) {
-                // Source is off-screen — use outside colour/intensity
-                final_r = out_r;
-                final_g = out_g;
-                final_b = out_b;
-                emit_source = true;
-            }
-            // else: source off-screen and outside_source disabled → no flare
 
             // Occlusion matte: dim the light by how much the matte covers it.
             if (emit_source && input(1)) {

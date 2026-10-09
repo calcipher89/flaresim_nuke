@@ -19,18 +19,18 @@ A new node that takes a **Camera** and an **Axis** (light position) as inputs in
 - **Intensity Falloff** — inverse-square-law scaling based on source distance
 - **Reference Distance** — distance (scene units) at which the flare has its nominal intensity
 - Source behind camera → no flare (physically correct)
-- Source off-screen → transitions seamlessly to Outside Source
+- Source off-screen → keeps flaring with its Light Colour
 
 Registered as `Filter/FlareSim3D`. Builds as a separate `.so` / `.dylib`.
 
-### Off-Screen Source
+### Placed Light (Manual XY and FlareSim3D)
 
-When the light source moves outside the frame, the flare no longer vanishes. A user-defined colour and intensity takes over, so the flare renders seamlessly as the source enters or leaves the plate. Works in both FlareSim (manual XY) and FlareSim3D (Camera + Axis).
+In **Manual XY** the flare comes from a light you place at **Source XY**; in FlareSim3D the light is the Axis. It always flares, whatever the plate looks like there, and keeps flaring when it leaves the frame.
 
-- **Enable Outside Source** — on/off toggle
-- **Outside Color** — RGB colour of the off-screen light
-- **Outside Intensity** — brightness of the off-screen source
-- **Edge Falloff (px)** — blend zone at the frame edge for smooth transitions
+- **Light Colour** — the light's colour (white by default); **Source Intensity** sets its brightness
+- **Colour From Plate** — tint the light with the plate's colour at its position (averaged over **Sample Radius**), so the flare picks up the colour and brightness of the light it sits on. Off by default.
+- **Edge Blend (px)** — with Colour From Plate, the zone at the frame edge where the plate colour fades to the plain Light Colour as the light leaves the frame
+- **Threshold** only applies to Auto Detect. The old Outside Source knobs are hidden; scripts that set them still load.
 
 ### Occlusion Matte
 
@@ -39,7 +39,7 @@ A light that goes behind a foreground object stops flaring. Connect a roto, or t
 - **Matte Mode** — **Occlude** (default): white in the matte hides the light. **Mask**: white lets the light through, so only lights inside the white area flare (what the input was meant for in the original FlareSim).
 - **Light Size** — diameter in pixels of the light as the matte sees it. Bigger gives a slower fade across an edge. Default 8.
 - Manual XY and FlareSim3D measure at the light's position (FlareSim3D uses where the Axis projects through the Camera). Auto Detect dims each detected light at its own spot, before **Max Sources**, so hidden lights don't use up places.
-- Lights outside the frame (Outside Source) are not affected.
+- Lights outside the frame are not affected.
 - The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
 
 ### Spectral Jitter
@@ -183,7 +183,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
    - Use **Source Cap** to stop one very hot light from overpowering the rest, and **Max Sources** to cap how many are traced.
    - Set **View** back to **Flare** for renders.
 
-   For a single tracked light instead, switch **Source Mode** to **Manual XY** and animate **Source XY** or link it to a Tracker.
+   To place a light yourself instead, switch **Source Mode** to **Manual XY**, put **Source XY** where the light is (animate it or link it to a Tracker), and set **Light Colour** and **Source Intensity**.
 5. Adjust **Flare Gain** to taste.
 
 **FlareSim3D** (3D source):
@@ -191,7 +191,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 2. Click **Lens Browser** to pick a lens.
 3. The flare tracks the Axis through the Camera automatically.
 4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
-5. Enable **Outside Source** so the flare persists when the source leaves the frame.
+5. Set **Light Colour** and **Source Intensity**; the flare keeps going when the Axis leaves the frame.
 6. If the light passes behind something, connect a matte of it to the **matte** input (see Occlusion Matte).
 
 ### Lens Browser
