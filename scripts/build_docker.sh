@@ -17,7 +17,7 @@
 #   flaresim-build:nuke16  aswf/ci-vfxall:2024  GCC 11 + CUDA 12.8
 #   flaresim-build:nuke17  aswf/ci-vfxall:2025  GCC 11 + CUDA 12.8
 #
-# Output: dist/nuke<major>/FlareSim.so and FlareSim3D.so
+# Output: dist/nuke<major>/FlareSim.so, FlareSim3D.so and flaresim_preview.so
 
 set -euo pipefail
 
@@ -91,7 +91,8 @@ for V in $VERSIONS; do
             "; then
         mkdir -p "${DIST_DIR}/nuke${V}"
         cp "${REPO_DIR}/build/docker-nuke${V}/FlareSim.so" \
-           "${REPO_DIR}/build/docker-nuke${V}/FlareSim3D.so" "${DIST_DIR}/nuke${V}/"
+           "${REPO_DIR}/build/docker-nuke${V}/FlareSim3D.so" \
+           "${REPO_DIR}/build/docker-nuke${V}/flaresim_preview.so" "${DIST_DIR}/nuke${V}/"
         echo "  OK -> ${DIST_DIR}/nuke${V}"
         succeeded+=("${V}")
     else

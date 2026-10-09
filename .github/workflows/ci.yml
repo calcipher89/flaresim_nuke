@@ -62,3 +62,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile Nuke Python files
         run: python3 -m py_compile nuke/*.py lenses/*.py
+
+  # The Lens Browser preview library with MSVC, plus its render test.
+  preview-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DFLARESIM_BUILD_PLUGINS=OFF
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

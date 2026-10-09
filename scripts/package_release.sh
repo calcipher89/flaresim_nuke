@@ -48,6 +48,11 @@ for NV in $NUKE_VERSIONS; do
     PKG="${STAGE}/FlareSim"
     rm -rf "${PKG}" && mkdir -p "${PKG}/lenses"
     cp "${SRC}/FlareSim.${EXT}" "${SRC}/FlareSim3D.${EXT}" "${PKG}/"
+    if [[ -f "${SRC}/flaresim_preview.${EXT}" ]]; then
+        cp "${SRC}/flaresim_preview.${EXT}" "${PKG}/"
+    else
+        echo "  Nuke ${NV}: flaresim_preview.${EXT} not found — Lens Browser preview will be off."
+    fi
     cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSim_LensBrowser.py" "${REPO_DIR}/nuke/FlareSim_Looks.py" "${PKG}/"
     cp -r "${REPO_DIR}/looks" "${PKG}/"
     cp -r "${REPO_DIR}/lenses/lens_files" "${PKG}/lenses/"

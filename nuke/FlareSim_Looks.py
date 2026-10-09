@@ -107,7 +107,7 @@ def _same(a, b):
 # Lens paths
 # ---------------------------------------------------------------------------
 
-def _lens_to_look(path):
+def lens_to_look(path):
     """Store bundled lenses relative to the lens library, others as-is."""
     if not path:
         return ''
@@ -190,7 +190,7 @@ def capture_look(node, name, description=''):
         'flaresim_look_version': LOOK_VERSION,
         'name': name,
         'description': description,
-        'lens': _lens_to_look(node['lens_file'].value()),
+        'lens': lens_to_look(node['lens_file'].value()),
         'knobs': {},
     }
     for k in LOOK_KNOBS:
@@ -212,26 +212,39 @@ def _safe_filename(name):
     return (stem or 'look') + '.json'
 
 
-def save_look(node, name, description='', folder=None, overwrite=False):
-    """Save the node's look to folder (default: your own looks folder).
+def write_look(look, folder=None, overwrite=False):
+    """Write a look dict to folder (default: your own looks folder).
 
     Returns the path written.  Raises FileExistsError when the file exists
     and overwrite is False.
     """
     folder = folder or USER_LOOKS_DIR
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, _safe_filename(name))
+    path = os.path.join(folder, _safe_filename(look['name']))
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(path)
-    look = capture_look(node, name, description)
+    data = {k: v for k, v in look.items() if not k.startswith('_')}
+    data.setdefault('flaresim_look_version', LOOK_VERSION)
     with open(path, 'w', encoding='utf-8') as fh:
-        json.dump(look, fh, indent=2)
+        json.dump(data, fh, indent=2)
         fh.write('\n')
     return path
 
 
-def apply_look(look, nodes):
+def save_look(node, name, description='', folder=None, overwrite=False):
+    """Save the node's look to folder (default: your own looks folder).
+
+    Returns the path written.  Raises FileExistsError when the file exists
+    and overwrite is False.
+    """
+    return write_look(capture_look(node, name, description), folder, overwrite)
+
+
+def apply_look(look, nodes, reset_surfaces=True):
     """Apply a look to FlareSim / FlareSim3D nodes.
+
+    With reset_surfaces, per-surface overrides not in the look go back to
+    their defaults, so the look fully defines them.
 
     Returns a list of warnings (e.g. a lens file that could not be found).
     """
@@ -249,7 +262,7 @@ def apply_look(look, nodes):
             if lens:
                 knobs['lens_file'].setValue(lens)
             # Reset surface overrides first so the look fully defines them.
-            for i in range(MAX_SURFS):
+            for i in range(MAX_SURFS if reset_surfaces else 0):
                 for pattern, default in SURF_KNOBS:
                     k = pattern % i
                     if k in knobs:

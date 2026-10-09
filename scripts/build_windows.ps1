@@ -11,7 +11,7 @@
 #   .\scripts\build_windows.ps1 -Versions 15,16
 #   .\scripts\build_windows.ps1 -NukeRoot "D:\Nuke"
 #
-# Output: dist\nuke<major>\FlareSim.dll and FlareSim3D.dll
+# Output: dist\nuke<major>\FlareSim.dll, FlareSim3D.dll and flaresim_preview.dll
 
 param(
     [int[]]  $Versions = @(14, 15, 16, 17),
@@ -65,7 +65,7 @@ foreach ($version in $Versions) {
 
     $outDir = Join-Path $DistDir "nuke$version"
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    Copy-Item (Join-Path $buildDir "FlareSim.dll"), (Join-Path $buildDir "FlareSim3D.dll") $outDir -Force
+    Copy-Item (Join-Path $buildDir "FlareSim.dll"), (Join-Path $buildDir "FlareSim3D.dll"), (Join-Path $buildDir "flaresim_preview.dll") $outDir -Force
     Write-Host "  OK -> $outDir" -ForegroundColor Green
     $succeeded += $version
 }

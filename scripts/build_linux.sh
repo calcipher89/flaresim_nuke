@@ -8,7 +8,7 @@
 #   scripts/build_linux.sh --nuke-root /opt         # where Nuke<ver> folders live
 #   scripts/build_linux.sh --dist-dir ./dist
 #
-# Output: dist/nuke<major>/FlareSim.so and FlareSim3D.so
+# Output: dist/nuke<major>/FlareSim.so, FlareSim3D.so and flaresim_preview.so
 #
 # Compiler: Nuke 14 expects GCC 9.3–9.5, Nuke 15+ GCC 11.  The CMake build
 # sets the libstdc++ ABI from the Nuke version; picking the right GCC is up to
@@ -52,7 +52,7 @@ for V in $VERSIONS; do
             -DNUKE_LIB_DIR="${NUKE_DIR}" \
        && cmake --build "${BUILD_DIR}" -j"$(nproc)"; then
         mkdir -p "${DIST_DIR}/nuke${V}"
-        cp "${BUILD_DIR}/FlareSim.so" "${BUILD_DIR}/FlareSim3D.so" "${DIST_DIR}/nuke${V}/"
+        cp "${BUILD_DIR}/FlareSim.so" "${BUILD_DIR}/FlareSim3D.so" "${BUILD_DIR}/flaresim_preview.so" "${DIST_DIR}/nuke${V}/"
         echo "  OK -> ${DIST_DIR}/nuke${V}"
         succeeded+=("${V}")
     else

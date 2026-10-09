@@ -84,7 +84,7 @@ The output is `build\nuke15\FlareSim.dll` and `build\nuke15\FlareSim3D.dll`.
 
 ## 5. Install
 
-The install step copies the plugins, `menu.py`, the Lens Browser and the lens library into one folder:
+The install step copies the plugins, the preview library (`flaresim_preview.dll`), `menu.py`, the Lens Browser and the lens library into one folder:
 
 ```bat
 cmake --install build\nuke15 --prefix "%USERPROFILE%\.nuke\plugins\FlareSim"
@@ -99,13 +99,13 @@ nuke.pluginAddPath('./plugins/FlareSim')
 Restart Nuke 15. You should see:
 
 - **Filter → FlareSim** and **Filter → FlareSim3D** in the node menu
-- A **Lens & Looks...** button on each FlareSim node, and **Window → FlareSim Lens Browser**, both opening on the bundled lens library
+- A **Lens Browser** button on each FlareSim node, and **Window → FlareSim Lens Browser**, both opening the Lens Browser window on the bundled lens library
 
 ## 6. Quick test in Nuke
 
 1. Read in a plate with a bright light, or use a `Constant` with a small bright `Radial` merged on top.
 2. Add **FlareSim** after it.
-3. Click **Lens & Looks...** on the node, type `50mm` in **Filter**, press **Refresh**, pick a lens (for example the Canon New FD 50mm f/1.4) and click **Load onto this node**.
+3. Click **Lens Browser** on the node, type `50mm` in the search box, pick a lens from the dropdown (for example the Canon New FD 50mm f/1.4), drag the light around the preview, then click **Apply to Node**.
 4. **Source Mode** is **Auto Detect** by default. Set **View** to **Sources Only**, adjust **Threshold** until only the light is marked, then set **View** back to **Flare**.
 5. Adjust **Flare Gain**.
 

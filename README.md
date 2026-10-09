@@ -99,9 +99,9 @@ Pre-built plugins are published as zips on the GitHub Releases page, one per Nuk
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | One build for every platform — picks CUDA or Metal automatically |
-| `src/` | Nuke nodes, optics core and CUDA kernels |
+| `src/` | Nuke nodes, optics core, CUDA kernels and the Lens Browser preview library |
 | `src/metal/` | macOS nodes and Metal shaders |
-| `nuke/` | `menu.py` and the dockable Lens Browser panel |
+| `nuke/` | `menu.py`, the Lens Browser window and the looks module |
 | `lenses/` | 1,370+ real lens prescriptions and the converter scripts |
 | `looks/` | Starter looks (lens + flare settings) shown in the Lens Browser |
 | `scripts/` | Multi-version build and release packaging scripts |
@@ -117,7 +117,7 @@ All platforms use the same root `CMakeLists.txt`:
 ```bash
 cmake -S . -B build -DNUKE_VERSION=15.1v10
 cmake --build build --config Release -j
-cmake --install build --prefix ~/.nuke/plugins/FlareSim   # plugins + menu.py + Lens Browser + looks + lenses
+cmake --install build --prefix ~/.nuke/plugins/FlareSim   # plugins + preview library + menu.py + Lens Browser + looks + lenses
 ```
 
 `NUKE_VERSION` is used to find the default install location (`/usr/local/Nuke<ver>`, `C:/Program Files/Nuke<ver>`, or `/Applications/Nuke<ver>/Nuke<ver>.app/Contents/MacOS`). Point at another install with `-DNDK_ROOT=<nuke>/include -DNUKE_LIB_DIR=<nuke>` (or `-DNUKE_ROOT=` on macOS).
@@ -151,12 +151,12 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ## Installation
 
-1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `looks/` and `lenses/`.
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `looks/` and `lenses/`.
 2. Add this to `~/.nuke/init.py`:
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
    ```
-3. Restart Nuke. The nodes appear under **Filter**. The **Lens & Looks...** button on each node, and **Window → FlareSim Lens Browser**, open the browser on the bundled lens library.
+3. Restart Nuke. The nodes appear under **Filter**. The **Lens Browser** button on each node, and **Window → FlareSim Lens Browser**, open the Lens Browser window on the bundled lens library.
 
 ---
 
@@ -164,7 +164,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 **FlareSim** (2D source):
 1. Connect your plate to the input.
-2. Click **Lens & Looks...** on the node to pick a lens or apply a look, or point **Lens File** at a `.lens` prescription.
+2. Click **Lens Browser** on the node to pick a lens with a live preview, or point **Lens File** at a `.lens` prescription.
 3. Set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
@@ -183,13 +183,26 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
 5. Enable **Outside Source** so the flare persists when the source leaves the frame.
 
+### Lens Browser
+
+The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim Lens Browser**) opens a window for picking a lens and building a look before you render:
+
+- **Lens**: pick from the dropdown, narrowed by the search box and the maker, type (cine, stills, anamorphic), focal length and speed filters. The arrows (or Page Up / Page Down) step through the matches.
+- **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it.
+- **Flare Look**: Gain, aperture Blades and Rotation, Ghost Blur. These are the node's knobs.
+- **Preview Light and Camera**: light intensity and colour, FOV and preview quality. These only shape the preview; the node keeps its own source and camera settings.
+- **Start From a Look**: load a saved look's lens and settings as a starting point.
+- **Apply to Node** sets the lens and look on the node the window was opened from (or the selected FlareSim node, or a new one). Ctrl+Z undoes it. **Save as Look...** keeps the settings as a look.
+
+The preview runs on the CPU from the `flaresim_preview` library installed next to the plugins, so it works without a GPU and doesn't compete with the node. Without that library the window still works, minus the preview.
+
 ### Looks
 
 A look is a lens plus the settings that shape its flare: Flare Gain, aperture, spectral, highlight, ghost blur and any per-surface overrides. Source position, threshold and camera are not part of a look, so it works on any shot.
 
-In the **Lens Browser** (the node's **Lens & Looks...** button, or **Window → FlareSim Lens Browser**):
-- Pick a look under **Looks** and click **Apply Look**. Ctrl+Z undoes it.
-- Tune a node, then click **Save Look...** to keep it. Your looks go in `~/.nuke/FlareSim/looks/`.
+In the **Lens Browser**:
+- Pick a look under **Start From a Look**, click **Load Look**, adjust it, then click **Apply to Node**. Ctrl+Z undoes it.
+- Click **Save as Look...** to keep the window's lens and settings. Your looks go in `~/.nuke/FlareSim/looks/`. **Reload From Node** first if you want to save a node's tuned settings, including its highlight and spectral knobs.
 - Set `FLARESIM_LOOKS_PATH` to one or more shared folders to give a whole team the same looks.
 
 FlareSim ships a few starter looks in `looks/` as starting points.
