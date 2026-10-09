@@ -26,6 +26,7 @@ import hashlib
 import math
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -47,6 +48,7 @@ FLARESIM_CLASSES = FlareSim_Looks.FLARESIM_CLASSES
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_LENS_ROOT = os.path.join(_HERE, 'lenses')
+USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lenses')
 
 
 # ---------------------------------------------------------------------------
@@ -84,13 +86,19 @@ SPEEDS = [
 ]
 
 TYPES = ['Any type', 'Cine', 'Stills', 'Anamorphic']
+# Where a lens came from: the lenses shipped with FlareSim, ones you
+# imported, or a studio folder in FLARESIM_LENS_PATH.
+LIBRARIES = [('All lenses', ''), ('Bundled', 'Bundled'), ('Mine (imported)', 'Mine'),
+             ('Studio', 'Studio')]
 
 
 class LensInfo(object):
-    __slots__ = ('path', 'name', 'maker', 'focal', 'fnum', 'kind', 'label', 'search')
+    __slots__ = ('path', 'name', 'maker', 'focal', 'fnum', 'kind', 'label', 'search',
+                 'library')
 
-    def __init__(self, path):
+    def __init__(self, path, library='Bundled'):
         self.path = path.replace('\\', '/')
+        self.library = library
         stem = os.path.splitext(os.path.basename(path))[0]
         self.name, self.focal, self.fnum = stem.replace('_', ' '), 0.0, 0.0
         anamorphic = False
@@ -149,12 +157,12 @@ class LensInfo(object):
 
 
 def lens_folders():
-    """Folders scanned for .lens files: the bundled library plus any in
-    FLARESIM_LENS_PATH."""
-    folders = [BUNDLED_LENS_ROOT]
+    """(folder, library) pairs scanned for .lens files: the bundled
+    library, your imported lenses, and any folders in FLARESIM_LENS_PATH."""
+    folders = [(BUNDLED_LENS_ROOT, 'Bundled'), (USER_LENS_DIR, 'Mine')]
     for d in os.environ.get('FLARESIM_LENS_PATH', '').split(os.pathsep):
         if d.strip():
-            folders.append(d.strip())
+            folders.append((d.strip(), 'Studio'))
     return folders
 
 
@@ -164,14 +172,15 @@ _lens_cache = {}
 def scan_lenses(folders):
     """All lenses in folders (recursively), sorted by label.  Cached."""
     out, seen = [], set()
-    for folder in folders:
+    for entry in folders:
+        folder, library = entry if isinstance(entry, tuple) else (entry, 'Studio')
         key = os.path.normcase(os.path.abspath(folder))
         if key not in _lens_cache:
             found = []
             for root, _dirs, files in os.walk(folder):
                 for fname in files:
                     if fname.lower().endswith('.lens'):
-                        found.append(LensInfo(os.path.join(root, fname)))
+                        found.append(LensInfo(os.path.join(root, fname), library))
             _lens_cache[key] = found
         for info in _lens_cache[key]:
             norm = os.path.normcase(info.path)
@@ -180,6 +189,83 @@ def scan_lenses(folders):
                 out.append(info)
     out.sort(key=lambda l: l.label.lower())
     return out
+
+
+def is_lens_file(path):
+    """True when path looks like a FlareSim .lens prescription."""
+    if not path.lower().endswith('.lens') or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                if line.strip().startswith('surfaces:'):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _same_file_contents(a, b):
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, 'rb') as fa, open(b, 'rb') as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def import_lenses(paths, dest_root=None):
+    """Copy .lens files and folders of them into your lens folder.
+
+    paths: files or folders.  A folder is copied with its own name and
+    sub-folders kept, so an imported set stays together.  A file that is
+    already there unchanged is skipped; a different file with the same
+    name gets a numbered name instead of replacing it.
+
+    Returns (imported, skipped, failed): lists of destination paths,
+    already-present source paths, and (source path, reason) pairs.
+    """
+    dest_root = dest_root or USER_LENS_DIR
+    jobs = []        # (source file, destination file)
+    failed = []
+    for p in paths:
+        p = os.path.abspath(p)
+        if os.path.isdir(p):
+            base = os.path.basename(p.rstrip('/\\')) or 'lenses'
+            for root, _dirs, files in os.walk(p):
+                rel = os.path.relpath(root, p)
+                for fname in sorted(files):
+                    if fname.lower().endswith('.lens'):
+                        jobs.append((os.path.join(root, fname),
+                                     os.path.normpath(os.path.join(dest_root, base, rel, fname))))
+        else:
+            jobs.append((p, os.path.join(dest_root, os.path.basename(p))))
+    imported, skipped = [], []
+    for src, dst in jobs:
+        if not is_lens_file(src):
+            failed.append((src, 'not a .lens file'))
+            continue
+        if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dst)):
+            skipped.append(src)
+            continue
+        stem, ext = os.path.splitext(dst)
+        n = 2
+        while os.path.exists(dst) and not _same_file_contents(src, dst):
+            dst = '%s_%d%s' % (stem, n, ext)
+            n += 1
+        if os.path.exists(dst):
+            skipped.append(src)
+            continue
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+        except OSError as e:
+            failed.append((src, str(e)))
+            continue
+        imported.append(dst.replace('\\', '/'))
+    _lens_cache.pop(os.path.normcase(os.path.abspath(dest_root)), None)
+    return imported, skipped, failed
 
 
 # ---------------------------------------------------------------------------
@@ -1475,13 +1561,12 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.search.setClearButtonEnabled(True)
         self.type_combo = QtWidgets.QComboBox()
         self.type_combo.addItems(TYPES)
+        self.library_combo = QtWidgets.QComboBox()
+        self.library_combo.setToolTip(
+            'Bundled: lenses that ship with FlareSim. Mine: lenses you imported '
+            '(~/.nuke/FlareSim/lenses). Studio: folders in FLARESIM_LENS_PATH.')
         self.maker_combo = QtWidgets.QComboBox()
-        counts = {}
-        for l in self._lenses:
-            counts[l.maker] = counts.get(l.maker, 0) + 1
-        self.maker_combo.addItem('All makers (%d)' % len(self._lenses), '')
-        for maker in sorted(counts, key=lambda m: (m == 'Other', m.lower())):
-            self.maker_combo.addItem('%s (%d)' % (maker, counts[maker]), maker)
+        self._fill_library_combos()
         self.focal_combo = QtWidgets.QComboBox()
         for label, _lo, _hi in FOCAL_RANGES:
             self.focal_combo.addItem(label)
@@ -1496,6 +1581,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.size_slider.setToolTip('Thumbnail size when the lens strip shows more than '
                                     'one row. A single row fills the strip.')
         filters.addRow(self.search)
+        filters.addRow('Library', self.library_combo)
         filters.addRow('Type', self.type_combo)
         filters.addRow('Maker', self.maker_combo)
         filters.addRow('Focal', self.focal_combo)
@@ -1516,14 +1602,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.grid.setStyleSheet('QListWidget { background: #1b1b1b; }')
         self.grid.setItemDelegate(LensTileDelegate(self.grid))
         self._placeholder = None
-        for l in self._lenses:
-            item = QtWidgets.QListWidgetItem(l.name)
-            item.setData(QtCore.Qt.UserRole, l.path)
-            item.setData(LensTileDelegate.SPEC_ROLE, self._item_spec(l))
-            item.setToolTip('%s\n%s, %s\n%s' % (l.label, l.maker, l.kind,
-                                                os.path.basename(l.path)))
-            self.grid.addItem(item)
-            self._items[l.path] = item
+        self._fill_grid()
         self.grid.setMinimumHeight(90)
 
         centre = QtWidgets.QWidget()
@@ -1578,9 +1657,20 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.info_label.setWordWrap(True)
         self.info_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         lg.addWidget(self.info_label)
+        lens_btns = QtWidgets.QHBoxLayout()
         open_btn = QtWidgets.QPushButton('Open .lens File...')
+        open_btn.setToolTip('Preview a .lens file from anywhere without adding it to the library.')
         open_btn.clicked.connect(self._browse_lens_file)
-        lg.addWidget(open_btn)
+        lens_btns.addWidget(open_btn)
+        import_btn = QtWidgets.QPushButton('Import Lens')
+        import_btn.setToolTip('Copy .lens files, or a folder of them, into your lens '
+                              'library (~/.nuke/FlareSim/lenses).')
+        import_menu = QtWidgets.QMenu(import_btn)
+        import_menu.addAction('Lens Files...', self._import_lens_files)
+        import_menu.addAction('Folder...', self._import_lens_folder)
+        import_btn.setMenu(import_menu)
+        lens_btns.addWidget(import_btn)
+        lg.addLayout(lens_btns)
         lv.addWidget(lens_box)
 
         look_box = QtWidgets.QGroupBox('Start From a Look')
@@ -1703,7 +1793,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
 
         # Signals.
         self.search.textChanged.connect(self._apply_filters)
-        for combo in (self.maker_combo, self.focal_combo, self.speed_combo, self.type_combo):
+        for combo in (self.library_combo, self.maker_combo, self.focal_combo,
+                      self.speed_combo, self.type_combo):
             combo.currentIndexChanged.connect(self._apply_filters)
         self.grid.currentItemChanged.connect(self._on_lens_picked)
         self.grid.itemDoubleClicked.connect(lambda _item: self._apply_to_node())
@@ -2093,13 +2184,16 @@ class LensBrowserWindow(QtWidgets.QWidget):
     def _apply_filters(self, *_args):
         terms = self.search.text().strip().lower().split()
         maker = self.maker_combo.currentData()
+        library = self.library_combo.currentData()
         _f, flo, fhi = FOCAL_RANGES[self.focal_combo.currentIndex()]
         _s, slo, shi = SPEEDS[self.speed_combo.currentIndex()]
         kind = self.type_combo.currentText()
         out = []
         for l in self._lenses:
             ok = True
-            if maker and l.maker != maker:
+            if library and l.library != library:
+                ok = False
+            elif maker and l.maker != maker:
                 ok = False
             elif self.focal_combo.currentIndex() and not (flo <= l.focal < fhi):
                 ok = False
@@ -2174,6 +2268,115 @@ class LensBrowserWindow(QtWidgets.QWidget):
         current = self._items.get(self._lens_path)
         i = items.index(current) if current in items else -1
         self.set_lens(items[(i + delta) % len(items)].data(QtCore.Qt.UserRole))
+
+    def _fill_library_combos(self):
+        """Library and maker filters with their lens counts; keeps the
+        current choices."""
+        library = self.library_combo.currentData()
+        maker = self.maker_combo.currentData()
+        for combo in (self.library_combo, self.maker_combo):
+            combo.blockSignals(True)
+            combo.clear()
+        lib_counts = {}
+        counts = {}
+        for l in self._lenses:
+            lib_counts[l.library] = lib_counts.get(l.library, 0) + 1
+            counts[l.maker] = counts.get(l.maker, 0) + 1
+        for label, key in LIBRARIES:
+            n = len(self._lenses) if not key else lib_counts.get(key, 0)
+            if key == 'Studio' and not n:
+                continue
+            self.library_combo.addItem('%s (%d)' % (label, n), key)
+        self.maker_combo.addItem('All makers (%d)' % len(self._lenses), '')
+        for m in sorted(counts, key=lambda m: (m == 'Other', m.lower())):
+            self.maker_combo.addItem('%s (%d)' % (m, counts[m]), m)
+        for combo, value in ((self.library_combo, library), (self.maker_combo, maker)):
+            i = combo.findData(value) if value else 0
+            combo.setCurrentIndex(max(i, 0))
+            combo.blockSignals(False)
+
+    def _fill_grid(self):
+        # Keep the thumbnails already rendered.
+        icons = dict((path, item.icon()) for path, item in self._items.items()
+                     if path in self._has_thumb)
+        self.grid.clear()
+        self._items = {}
+        for l in self._lenses:
+            item = QtWidgets.QListWidgetItem(l.name)
+            item.setData(QtCore.Qt.UserRole, l.path)
+            item.setData(LensTileDelegate.SPEC_ROLE, self._item_spec(l))
+            item.setToolTip('%s\n%s, %s  (%s)\n%s' % (l.label, l.maker, l.kind, l.library,
+                                                      os.path.basename(l.path)))
+            if l.path in icons:
+                item.setIcon(icons[l.path])
+            self.grid.addItem(item)
+            self._items[l.path] = item
+
+    def _import_lens_files(self):
+        paths, _f = QtWidgets.QFileDialog.getOpenFileNames(
+            self, 'Import Lens Files', self._import_start_dir(),
+            'Lens files (*.lens);;All files (*)')
+        if paths:
+            self.import_lenses(paths)
+
+    def _import_lens_folder(self):
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Import a Folder of Lenses', self._import_start_dir())
+        if path:
+            self.import_lenses([path])
+
+    def _import_start_dir(self):
+        st = self._settings()
+        last = st.value('import_dir')
+        return str(last) if last and os.path.isdir(str(last)) else os.path.expanduser('~')
+
+    def import_lenses(self, paths, quiet=False):
+        """Copy lenses into your library, list them and show the first one."""
+        if paths:
+            first = os.path.abspath(paths[0])
+            self._settings().setValue(
+                'import_dir', first if os.path.isdir(first) else os.path.dirname(first))
+        imported, skipped, failed = import_lenses(paths)
+        self._reload_lenses()
+        if imported or skipped:
+            # Show what was imported: the Mine library, unfiltered.
+            self.search.clear()
+            for combo in (self.type_combo, self.focal_combo, self.speed_combo, self.maker_combo):
+                combo.setCurrentIndex(0)
+            i = self.library_combo.findData('Mine')
+            if i >= 0:
+                self.library_combo.setCurrentIndex(i)
+            self._apply_filters()
+            show = imported[0] if imported else None
+            if show and show in self._items:
+                self.set_lens(show)
+        lines = []
+        if imported:
+            lines.append('Imported %d lens%s into %s.' % (
+                len(imported), '' if len(imported) == 1 else 'es', USER_LENS_DIR))
+        if skipped:
+            lines.append('%d %s already in your library.' % (
+                len(skipped), 'was' if len(skipped) == 1 else 'were'))
+        if failed:
+            lines.append('%d could not be imported:' % len(failed))
+            lines += ['  %s: %s' % (os.path.basename(p), why) for p, why in failed[:10]]
+            if len(failed) > 10:
+                lines.append('  ...and %d more' % (len(failed) - 10))
+        if not lines:
+            lines.append('No .lens files found.')
+        nuke.tprint('FlareSim: ' + ' '.join(l.strip() for l in lines))
+        if not quiet:
+            box = QtWidgets.QMessageBox.warning if failed and not imported else \
+                QtWidgets.QMessageBox.information
+            box(self, 'Import Lens', '\n'.join(lines))
+        return imported, skipped, failed
+
+    def _reload_lenses(self):
+        """Rescan the lens folders after an import."""
+        self._lenses = scan_lenses(lens_folders())
+        self._fill_library_combos()
+        self._fill_grid()
+        self._apply_filters()
 
     def _browse_lens_file(self):
         start = os.path.dirname(self._lens_path) if self._lens_path else BUNDLED_LENS_ROOT

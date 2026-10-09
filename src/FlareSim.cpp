@@ -314,6 +314,25 @@ public:
     // Per-instance labels for surface knobs (stable pointers for Knob API)
     char        surf_labels_[MAX_SURFS_UI][64];
 
+    // The Lens Browser button names the current lens, since the Lens File
+    // knob itself is hidden.  Nuke keeps the label pointer, so it lives here.
+    char lens_button_label_[192] = "Lens Browser";
+
+    void update_lens_button_label()
+    {
+        std::string name(lens_file_ ? lens_file_ : "");
+        const size_t slash = name.find_last_of("/\\");
+        if (slash != std::string::npos) name = name.substr(slash + 1);
+        const size_t dot = name.rfind('.');
+        if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
+        if (name.empty())
+            snprintf(lens_button_label_, sizeof(lens_button_label_), "Lens Browser");
+        else
+            snprintf(lens_button_label_, sizeof(lens_button_label_),
+                     "Lens Browser  (%s)", name.c_str());
+        if (Knob* kb = knob("lens_browser")) kb->label(lens_button_label_);
+    }
+
     // ---- Runtime state ----
     LensSystem  lens_;
     std::string last_lens_file_;
@@ -560,14 +579,18 @@ public:
     // ---- Knobs ----
     void knobs(Knob_Callback f) override
     {
-        File_knob(f, &lens_file_,  "lens_file",      "Lens File");
-        Tooltip(f, "Path to a .lens prescription file.");
+        File_knob(f, &lens_file_, "lens_file", "Lens File");
+        // Hidden: the Lens Browser sets it.  Still saved in the script and
+        // settable from Python or the knob's expression.
+        SetFlags(f, Knob::HIDDEN);
+        Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
         PyScript_knob(f, "import FlareSim_LensBrowser\n"
                          "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
-                      "lens_browser", "Lens Browser");
+                      "lens_browser", lens_button_label_);
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
-                   "then apply it to this node or save it as a look.");
+                   "then apply it to this node or save it as a look.  The button "
+                   "shows the node's current lens.");
 
         Divider(f, "Source");
         static const char* const kSourceModes[] = {
@@ -866,6 +889,7 @@ public:
         };
         if (k->is("showPanel")) {
             sync_source_mode_enabled();
+            update_lens_button_label();
             // fall through — other handlers don't care about showPanel
         }
         if (k->is("source_mode")) {
@@ -934,6 +958,7 @@ public:
             return 1;
         }
         if (k->is("lens_file")) {
+            update_lens_button_label();
             // Reload lens interactively and rebuild pair UI immediately.
             const std::string path(lens_file_ ? lens_file_ : "");
             if (!path.empty() && path != last_lens_file_) {
