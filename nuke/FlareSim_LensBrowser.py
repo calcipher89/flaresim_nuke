@@ -71,8 +71,15 @@ class FlareLensBrowser(nukescripts.PythonPanel):
 
     PANEL_ID = 'uk.co.flaresim.lensbrowser'
 
-    def __init__(self):
-        super().__init__('FlareSim Lens Browser', self.PANEL_ID)
+    def __init__(self, node=None):
+        # With a node, the browser is tied to it (opened from the node's
+        # "Lens & Looks..." button); otherwise it acts on the selection.
+        self._node = node
+        if node is not None:
+            super().__init__('FlareSim Lens Browser: %s' % node.name())
+        else:
+            super().__init__('FlareSim Lens Browser', self.PANEL_ID)
+        target = 'this node' if node is not None else 'selected FlareSim'
 
         # --- Lens folder row ---
         self._dir_knob = nuke.String_Knob('lens_dir', 'Lens Folder')
@@ -95,7 +102,7 @@ class FlareLensBrowser(nukescripts.PythonPanel):
         self._list_knob.setTooltip('Select a lens, then click Load.')
 
         # --- Load ---
-        self._load_knob = nuke.Script_Knob('load_lens', 'Load onto selected FlareSim')
+        self._load_knob = nuke.Script_Knob('load_lens', 'Load onto ' + target)
         self._load_knob.setTooltip(
             'Sets the Lens File knob on the selected FlareSim / FlareSim3D node(s). '
             'If no FlareSim node is selected but exactly one exists in the script, '
@@ -113,7 +120,7 @@ class FlareLensBrowser(nukescripts.PythonPanel):
         self._look_refresh_knob = nuke.Script_Knob('look_refresh', 'Refresh')
         self._look_refresh_knob.clearFlag(nuke.STARTLINE)
         self._look_info_knob = nuke.Text_Knob('look_info', '', '')
-        self._apply_look_knob = nuke.Script_Knob('apply_look', 'Apply Look to selected FlareSim')
+        self._apply_look_knob = nuke.Script_Knob('apply_look', 'Apply Look to ' + target)
         self._apply_look_knob.setTooltip(
             'Sets the lens and look settings on the selected FlareSim / '
             'FlareSim3D node(s).  Undo with Ctrl+Z.'
@@ -255,13 +262,24 @@ class FlareLensBrowser(nukescripts.PythonPanel):
             nuke.message('No lens selected, or list needs refreshing.')
             return
 
-        nodes = FlareSim_Looks.target_nodes()
+        nodes = self._targets()
         if not nodes:
             return
 
         fpath_nuke = fpath.replace('\\', '/')
         for n in nodes:
             n['lens_file'].setValue(fpath_nuke)
+
+    def _targets(self):
+        """The node this browser is tied to, or the selected FlareSim nodes."""
+        if self._node is None:
+            return FlareSim_Looks.target_nodes()
+        try:
+            self._node.name()  # raises ValueError once the node is deleted
+        except ValueError:
+            nuke.message('This FlareSim node no longer exists.')
+            return []
+        return [self._node]
 
     # ------------------------------------------------------------------
     # Looks
@@ -304,7 +322,7 @@ class FlareLensBrowser(nukescripts.PythonPanel):
         if not look:
             nuke.message('No look selected, or the list needs refreshing.')
             return
-        nodes = FlareSim_Looks.target_nodes()
+        nodes = self._targets()
         if not nodes:
             return
         warnings = FlareSim_Looks.apply_look(look, nodes)
@@ -312,7 +330,7 @@ class FlareLensBrowser(nukescripts.PythonPanel):
             nuke.message('Look applied with warnings:\n' + '\n'.join(warnings))
 
     def _save_look(self):
-        nodes = FlareSim_Looks.target_nodes()
+        nodes = self._targets()
         if not nodes:
             return
         if len(nodes) > 1:
@@ -356,7 +374,22 @@ def _show_browser():
     return panel.addToPane()
 
 
+# Floating browsers opened from a node's button, kept alive by node name.
+_node_browsers = {}
+
+
+def show_for_node(node):
+    """Open a floating Lens Browser tied to one FlareSim node.
+
+    Called from the "Lens & Looks..." button on FlareSim / FlareSim3D.
+    """
+    panel = FlareLensBrowser(node)
+    _node_browsers[node.fullName()] = panel
+    panel.show()
+
+
 def register():
-    """Register the panel with Nuke and add it to the Pane menu."""
+    """Register the panel with Nuke and add it to the Pane and Window menus."""
     nukescripts.registerPanel(FlareLensBrowser.PANEL_ID, _show_browser)
     nuke.menu('Pane').addCommand('FlareSim Lens Browser', _show_browser)
+    nuke.menu('Nuke').addCommand('Window/FlareSim Lens Browser', _show_browser)

@@ -156,7 +156,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
    ```
-3. Restart Nuke. The nodes appear under **Filter**, and **Pane → FlareSim Lens Browser** opens on the bundled lens library.
+3. Restart Nuke. The nodes appear under **Filter**. The **Lens & Looks...** button on each node, and **Window → FlareSim Lens Browser**, open the browser on the bundled lens library.
 
 ---
 
@@ -164,7 +164,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 **FlareSim** (2D source):
 1. Connect your plate to the input.
-2. Point **Lens File** at a `.lens` prescription, or pick one in the **Lens Browser**.
+2. Click **Lens & Looks...** on the node to pick a lens or apply a look, or point **Lens File** at a `.lens` prescription.
 3. Set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
@@ -187,8 +187,8 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 A look is a lens plus the settings that shape its flare: Flare Gain, aperture, spectral, highlight, ghost blur and any per-surface overrides. Source position, threshold and camera are not part of a look, so it works on any shot.
 
-In the **Lens Browser** panel:
-- Pick a look under **Looks** and click **Apply Look to selected FlareSim**. Ctrl+Z undoes it.
+In the **Lens Browser** (the node's **Lens & Looks...** button, or **Window → FlareSim Lens Browser**):
+- Pick a look under **Looks** and click **Apply Look**. Ctrl+Z undoes it.
 - Tune a node, then click **Save Look...** to keep it. Your looks go in `~/.nuke/FlareSim/looks/`.
 - Set `FLARESIM_LOOKS_PATH` to one or more shared folders to give a whole team the same looks.
 
