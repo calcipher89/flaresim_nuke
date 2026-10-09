@@ -883,21 +883,28 @@ public:
                 error("%s", msg.c_str());
                 return;
             }
-            pending_x0_       = x0;
-            pending_y0_       = y0;
-            pending_x1_       = x1;
-            pending_y1_       = y1;
-            pending_w_        = w;
-            pending_h_        = h;
-            const Format& fmt = format();
-            pending_fmt_x0_   = fmt.x();
-            pending_fmt_y0_   = fmt.y();
-            pending_fmt_w_    = fmt.width();
-            pending_fmt_h_    = fmt.height();
-            pending_num_surfs_  = lens_.num_surfaces();  // thread-safe snapshot
-            pending_frame_     = (int)outputContext().frame();
+            capture_pending_state();
             needs_compute_ = true;
         }
+    }
+
+    // Snapshot the current frame, bbox and format for do_compute().
+    // Caller must hold compute_mutex_.
+    void capture_pending_state()
+    {
+        pending_x0_       = info_.x();
+        pending_y0_       = info_.y();
+        pending_x1_       = info_.r();
+        pending_y1_       = info_.t();
+        pending_w_        = pending_x1_ - pending_x0_;
+        pending_h_        = pending_y1_ - pending_y0_;
+        const Format& fmt = format();
+        pending_fmt_x0_   = fmt.x();
+        pending_fmt_y0_   = fmt.y();
+        pending_fmt_w_    = fmt.width();
+        pending_fmt_h_    = fmt.height();
+        pending_num_surfs_  = lens_.num_surfaces();  // thread-safe snapshot
+        pending_frame_     = (int)outputContext().frame();
     }
 
     // ---- do_compute ----
@@ -1348,14 +1355,19 @@ public:
         const int cur_frame = (int)outputContext().frame();
         {
             std::lock_guard<std::mutex> lock(compute_mutex_);
-            // Only run do_compute if the pending state matches this frame.
-            // If _validate() for a later frame has already overwritten the
-            // pending state, skip — Nuke will re-request this frame later
-            // with a correct _validate → engine sequence.
-            if (needs_compute_ && pending_frame_ == cur_frame) {
+            // Compute when _validate() asked for it, or when the cache holds
+            // another frame. The second case happens when Nuke reuses this op
+            // for a different frame without validating it again, for example
+            // in the viewer after a Write render. Skipping it here would
+            // output black, and Nuke would keep that black in its cache.
+            if (needs_compute_ || cache_frame_ != cur_frame) {
+                if (pending_frame_ != cur_frame)
+                    capture_pending_state();
                 needs_compute_ = false;
-                do_compute();
-                cache_frame_ = cur_frame;
+                if (pending_w_ > 0 && pending_h_ > 0) {
+                    do_compute();
+                    cache_frame_ = cur_frame;
+                }
             }
         }
 
