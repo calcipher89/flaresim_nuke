@@ -905,6 +905,32 @@ _EDITED_KNOBS = ('flare_gain', 'aperture_blades', 'aperture_rotation',
 
 QUALITY = [('Draft', 32, 4), ('Good', 48, 8), ('Best', 64, 16)]   # grid, passes
 
+# Preview-only settings, remembered between sessions until reset.
+PREVIEW_DEFAULTS = {
+    'exposure': 0.0,
+    'show_light': True,
+    'intensity': 8.0,
+    'colour': '#ffffff',
+    'fov': 40.0,
+    'quality': 1,
+}
+
+
+def _setting_bool(value, default):
+    """QSettings hands back 'true' / 'false' strings on some platforms."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.lower() in ('1', 'true', 'yes')
+    return bool(value)
+
+
+def _setting_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 
 def _nuke_main_window():
     app = QtWidgets.QApplication.instance()
@@ -1416,6 +1442,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._refresh_timer.timeout.connect(self._request_render)
 
         self._restore_layout()
+        self._restore_preview()
+        # Save preview settings shortly after they change, so they survive
+        # even if Nuke quits without closing the window.
+        self._preview_save_timer = QtCore.QTimer(self)
+        self._preview_save_timer.setSingleShot(True)
+        self._preview_save_timer.setInterval(500)
+        self._preview_save_timer.timeout.connect(self._save_preview)
+        for row in (self.exposure, self.intensity, self.fov):
+            row.valueChanged.connect(self._preview_save_timer.start)
+        self.quality.currentIndexChanged.connect(self._preview_save_timer.start)
+        self.show_source.toggled.connect(self._preview_save_timer.start)
         self._apply_filters()
         self._refresh_looks()
 
@@ -1496,8 +1533,14 @@ class LensBrowserWindow(QtWidgets.QWidget):
         cv.addWidget(self.view, 1)
         under = QtWidgets.QHBoxLayout()
         under.addWidget(QtWidgets.QLabel('Exposure'))
-        self.exposure = SliderRow(-6.0, 6.0, 0.0, decimals=2, step=0.25)
+        self.exposure = SliderRow(-6.0, 6.0, PREVIEW_DEFAULTS['exposure'], decimals=2, step=0.25)
         under.addWidget(self.exposure, 1)
+        exp_reset = QtWidgets.QPushButton('Reset')
+        exp_reset.setToolTip('Put the preview exposure back to 0. '
+                             'Exposure is remembered when the browser closes.')
+        exp_reset.clicked.connect(
+            lambda: self.exposure.setValue(PREVIEW_DEFAULTS['exposure']))
+        under.addWidget(exp_reset)
         self.show_source = QtWidgets.QCheckBox('Show light')
         self.show_source.setChecked(True)
         under.addWidget(self.show_source)
@@ -1603,8 +1646,12 @@ class LensBrowserWindow(QtWidgets.QWidget):
         ll.addRow('Colour', self.colour_btn)
         ll.addRow('FOV', self.fov)
         ll.addRow('Quality', self.quality)
-        note = QtWidgets.QLabel('These shape the preview only. The node keeps its own '
-                                'source and camera settings.')
+        light_reset = QtWidgets.QPushButton('Reset Preview Light')
+        light_reset.setToolTip('Put intensity, colour, FOV and quality back to their defaults.')
+        light_reset.clicked.connect(self._reset_preview_light)
+        ll.addRow(light_reset)
+        note = QtWidgets.QLabel('Preview only, remembered between sessions. Opening '
+                                'the browser from a node uses its intensity and FOV.')
         note.setWordWrap(True)
         note.setStyleSheet('color: #999;')
         ll.addRow(note)
@@ -2443,6 +2490,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._source_colour = c
             self._update_colour_button()
             self._schedule_render()
+            self._save_preview()
 
     def _update_colour_button(self):
         self.colour_btn.setStyleSheet('background-color: %s; min-height: 18px;'
@@ -2567,6 +2615,44 @@ class LensBrowserWindow(QtWidgets.QWidget):
             if value is not None:
                 restore(value)
 
+    def _restore_preview(self):
+        """Preview exposure, light and quality from the last session."""
+        st = self._settings()
+        st.beginGroup('preview')
+        d = PREVIEW_DEFAULTS
+        self.exposure.setValue(_setting_float(st.value('exposure'), d['exposure']))
+        self.show_source.setChecked(_setting_bool(st.value('show_light'), d['show_light']))
+        self.intensity.setValue(_setting_float(st.value('intensity'), d['intensity']))
+        self.fov.setValue(_setting_float(st.value('fov'), d['fov']))
+        quality = int(_setting_float(st.value('quality'), d['quality']))
+        if 0 <= quality < len(QUALITY):
+            self.quality.setCurrentIndex(quality)
+        colour = QtGui.QColor(str(st.value('colour') or d['colour']))
+        st.endGroup()
+        self._source_colour = colour if colour.isValid() else QtGui.QColor(d['colour'])
+        self._update_colour_button()
+
+    def _save_preview(self):
+        st = self._settings()
+        st.beginGroup('preview')
+        st.setValue('exposure', self.exposure.value())
+        st.setValue('show_light', self.show_source.isChecked())
+        st.setValue('intensity', self.intensity.value())
+        st.setValue('fov', self.fov.value())
+        st.setValue('quality', self.quality.currentIndex())
+        st.setValue('colour', self._source_colour.name())
+        st.endGroup()
+
+    def _reset_preview_light(self):
+        d = PREVIEW_DEFAULTS
+        self.intensity.setValue(d['intensity'])
+        self.fov.setValue(d['fov'])
+        self.quality.setCurrentIndex(d['quality'])
+        self._source_colour = QtGui.QColor(d['colour'])
+        self._update_colour_button()
+        self._schedule_render()
+        self._save_preview()
+
     def _save_layout(self):
         st = self._settings()
         st.setValue('geometry', self.saveGeometry())
@@ -2576,6 +2662,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
     def closeEvent(self, event):
         global _window
         self._save_layout()
+        self._save_preview()
         if self._renderer is not None:
             self._renderer.stop()
             self._renderer = None
