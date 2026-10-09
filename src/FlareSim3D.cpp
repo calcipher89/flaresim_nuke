@@ -190,6 +190,8 @@ public:
     float       outside_source_color_[3];
     float       outside_source_intensity_;
     float       outside_source_falloff_;
+    float       light_color_[3];          // Light Colour
+    bool        color_from_plate_;        // tint the light by the plate
     int         matte_mode_;               // flaresim::MatteMode
     float       light_size_;               // matte disc diameter, pixels
 
@@ -298,6 +300,8 @@ public:
         , matte_mode_(flaresim::kMatteOcclude)
         , light_size_(8.0f)
     {
+        light_color_[0] = light_color_[1] = light_color_[2] = 1.0f;
+        color_from_plate_ = false;
         outside_source_color_[0] = 1.0f;
         outside_source_color_[1] = 1.0f;
         outside_source_color_[2] = 1.0f;
@@ -474,15 +478,29 @@ public:
         Bool_knob(f, &jitter_auto_seed_, "jitter_auto_seed", "Auto Seed");
 
         Divider(f, "Source");
-        Int_knob(f, &sample_radius_, "sample_radius", "Sample Radius");
-        Tooltip(f, "Radius (in pixels) of the area averaged around the projected "
-                   "source position to determine source colour and brightness.");
         Float_knob(f, &source_intensity_, "source_intensity", "Source Intensity");
         SetRange(f, 1.0, 50.0);
-        Tooltip(f, "HDR brightness boost for the sampled plate colour.  Default 8.");
+        Tooltip(f, "How bright the light at the Axis is.  Default 8.");
+        Color_knob(f, light_color_, "light_color", "Light Colour");
+        Tooltip(f, "Colour of the light.  White (default) gives a neutral flare; "
+                   "Source Intensity sets how bright it is.");
+        Bool_knob(f, &color_from_plate_, "color_from_plate", "Colour From Plate");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Tint the light with the plate's colour at the light, averaged "
+                   "over Sample Radius, so the flare picks up the colour (and "
+                   "brightness) of the light it sits on.  Off by default.  "
+                   "Off screen the light keeps its Light Colour.");
+        Int_knob(f, &sample_radius_, "sample_radius", "Sample Radius");
+        Tooltip(f, "With Colour From Plate: radius (in pixels) of the area "
+                   "averaged around the projected light for its colour.");
+        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Blend (px)");
+        SetRange(f, 0.0, 200.0);
+        Tooltip(f, "With Colour From Plate: blend zone in pixels at the frame "
+                   "edge, where the plate colour fades to the plain Light Colour "
+                   "as the light leaves the frame.  0 = hard switch.");
+        // Kept (hidden) so older scripts load; the Axis is the light now.
         Float_knob(f, &threshold_, "threshold", "Threshold");
-        SetRange(f, 0.0, 1.0);
-        Tooltip(f, "Minimum luminance at the projected position for a flare to appear.");
+        SetFlags(f, Knob::HIDDEN);
 
         Divider(f, "Distance");
         Bool_knob(f, &intensity_falloff_, "intensity_falloff", "Intensity Falloff");
@@ -506,7 +524,7 @@ public:
                    "out smoothly as it slides behind an edge.\n"
                    "Mask: white lets the light through; only lights inside the "
                    "white area flare.\n"
-                   "Lights outside the frame (Outside Source) are not affected.\n\nThe light is measured where the Axis projects through the Camera.");
+                   "Lights outside the frame are not affected.\n\nThe light is measured where the Axis projects through the Camera.");
         Float_knob(f, &light_size_, "light_size", "Light Size");
         SetRange(f, 1.0, 100.0);
         Tooltip(f, "Diameter in pixels of the light as the matte sees it.  The "
@@ -514,17 +532,14 @@ public:
                    "Bigger = a slower fade as the light passes an edge.  "
                    "Default 8.");
 
-        Divider(f, "Outside Source");
+        // Kept (hidden) so older scripts load: the light now always flares
+        // off screen with its own colour.
         Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
-        Tooltip(f, "When the projected light position is outside the frame, use the "
-                   "colour and intensity below instead of sampling the image.");
+        SetFlags(f, Knob::HIDDEN);
         Color_knob(f, outside_source_color_, "outside_source_color", "Outside Color");
-        SetFlags(f, Knob::STARTLINE);
+        SetFlags(f, Knob::HIDDEN);
         Float_knob(f, &outside_source_intensity_, "outside_source_intensity", "Outside Intensity");
-        SetRange(f, 0.0, 50.0);
-        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Falloff (px)");
-        SetRange(f, 0.0, 200.0);
-        Tooltip(f, "Blend zone in pixels at the frame edge.  0 = hard switch.");
+        SetFlags(f, Knob::HIDDEN);
 
         Divider(f, "Aperture");
         Int_knob(f, &aperture_blades_, "aperture_blades", "Aperture Blades");
@@ -608,6 +623,11 @@ public:
     // ---- knob_changed ----
     int knob_changed(Knob* k) override
     {
+        if (k->is("showPanel") || k->is("color_from_plate")) {
+            if (Knob* x = knob("sample_radius"))          x->enable(color_from_plate_);
+            if (Knob* x = knob("outside_source_falloff")) x->enable(color_from_plate_);
+        }
+        if (k->is("color_from_plate")) return 1;
         if (k->is("showPanel"))
             update_lens_button_label();   // and fall through
         if (k->is("surf_refresh")) { rebuild_surf_ui(); return 1; }
@@ -869,10 +889,16 @@ public:
         const int sx0 = std::max(x0, mx - sr);
         const int sx1 = std::min(x1, mx + sr + 1);
 
-        float img_r = 0, img_g = 0, img_b = 0;
-        bool  have_image_sample = false;
+        // ---- The light: its own colour, optionally tinted by the plate ----
+        // The Axis is the light itself, so it always flares (on screen or
+        // off) unless it is behind the camera.
+        const float si = source_intensity_ * 1000.0f;
+        float final_r = light_color_[0] * si;
+        float final_g = light_color_[1] * si;
+        float final_b = light_color_[2] * si;
+        bool  emit_source = true;
 
-        if (source_on_screen && sx0 < sx1 && sy0 < sy1)
+        if (color_from_plate_ && source_on_screen && sx0 < sx1 && sy0 < sy1)
         {
             float sum_r = 0, sum_g = 0, sum_b = 0;
             int   cnt   = 0;
@@ -890,58 +916,23 @@ public:
                 }
             }
             if (cnt > 0) {
-                img_r = sum_r / cnt;
-                img_g = sum_g / cnt;
-                img_b = sum_b / cnt;
-                float luma = 0.2126f * img_r + 0.7152f * img_g + 0.0722f * img_b;
-                have_image_sample = (luma >= threshold_);
+                const float pr = sum_r / cnt * final_r;
+                const float pg = sum_g / cnt * final_g;
+                const float pb = sum_b / cnt * final_b;
+                // Near the frame edge, blend from the plate's colour to the plain
+                // light colour, which is all the light has once it leaves.
+                const float falloff = std::max(outside_source_falloff_, 0.0f);
+                const float t = (falloff > 0.0f && dist_inside < falloff)
+                                ? std::clamp(dist_inside / falloff, 0.0f, 1.0f) : 1.0f;
+                final_r = t * pr + (1.0f - t) * final_r;
+                final_g = t * pg + (1.0f - t) * final_g;
+                final_b = t * pb + (1.0f - t) * final_b;
             }
         }
 
-        // ================================================================
-        // Build the source, blending with outside colour if needed
-        // ================================================================
         std::vector<BrightPixel> sources;
 
         {
-            const float out_si = outside_source_intensity_ * 1000.0f;
-            const float out_r = outside_source_color_[0] * out_si;
-            const float out_g = outside_source_color_[1] * out_si;
-            const float out_b = outside_source_color_[2] * out_si;
-
-            float final_r, final_g, final_b;
-            bool  emit_source = false;
-
-            if (have_image_sample && !outside_source_enable_) {
-                const float si = source_intensity_ * 1000.0f;
-                final_r = img_r * si;
-                final_g = img_g * si;
-                final_b = img_b * si;
-                emit_source = true;
-            }
-            else if (have_image_sample && outside_source_enable_) {
-                const float falloff = std::max(outside_source_falloff_, 0.0f);
-                if (falloff > 0.0f && dist_inside < falloff) {
-                    const float t = std::clamp(dist_inside / falloff, 0.0f, 1.0f);
-                    const float si = source_intensity_ * 1000.0f;
-                    final_r = t * (img_r * si) + (1.0f - t) * out_r;
-                    final_g = t * (img_g * si) + (1.0f - t) * out_g;
-                    final_b = t * (img_b * si) + (1.0f - t) * out_b;
-                } else {
-                    const float si = source_intensity_ * 1000.0f;
-                    final_r = img_r * si;
-                    final_g = img_g * si;
-                    final_b = img_b * si;
-                }
-                emit_source = true;
-            }
-            else if (!source_on_screen && outside_source_enable_) {
-                final_r = out_r;
-                final_g = out_g;
-                final_b = out_b;
-                emit_source = true;
-            }
-            // else: off-screen and outside_source disabled → no flare
 
             // Apply distance-based inverse-square intensity falloff
             if (emit_source && intensity_falloff_ && source_dist > 0.001f) {
