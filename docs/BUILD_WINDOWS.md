@@ -105,7 +105,7 @@ Restart Nuke 15. You should see:
 
 1. Read in a plate with a bright light, or use a `Constant` with a small bright `Radial` merged on top.
 2. Add **FlareSim** after it.
-3. Click **Lens Browser** on the node, type `50mm` in the search box, pick a lens from the dropdown (for example the Canon New FD 50mm f/1.4), drag the light around the preview, then click **Apply to Node**.
+3. Click **Lens Browser** on the node, type `50mm` in the search box, click a lens thumbnail (for example the Canon New FD 50mm f/1.4), drag the light around the preview, then click **Apply to Node**.
 4. **Source Mode** is **Auto Detect** by default. Set **View** to **Sources Only**, adjust **Threshold** until only the light is marked, then set **View** back to **Flare**.
 5. Adjust **Flare Gain**.
 

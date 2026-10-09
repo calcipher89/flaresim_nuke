@@ -3,7 +3,9 @@ FlareSim_LensBrowser.py — the FlareSim Lens Browser window.
 
 A standalone Qt window for picking a lens and building a flare look:
 
-  * a lens dropdown with search, maker, focal length, speed and type filters
+  * lens thumbnails under the preview, each a small render of that lens's
+    flare, with search, maker, focal length, speed and type filters; drag
+    the divider to go from a one-row carousel to a grid
   * a live flare preview: drag the light around to see the ghosts move
   * look controls (gain, aperture, ghost blur) that drive the preview
   * start from a saved look, apply the result to a FlareSim node, or save it
@@ -14,10 +16,11 @@ from Window > FlareSim Lens Browser.
 
 The preview is rendered by the flaresim_preview library that is built and
 installed next to the plugins.  Without it the window still works, minus the
-preview.
+preview and thumbnails.  Thumbnails are cached in ~/.nuke/FlareSim/thumbnails.
 """
 
 import ctypes
+import hashlib
 import os
 import re
 import sys
@@ -358,6 +361,113 @@ class PreviewRenderer(QtCore.QObject):
         return lens
 
 
+# Thumbnails: every lens rendered with the same light and settings, so they
+# can be compared side by side.  Bump THUMB_VERSION when the look changes so
+# old cached images are not reused.
+THUMB_SIZE = (240, 135)
+THUMB_VERSION = 1
+THUMB_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'thumbnails')
+THUMB_PARAMS = dict(
+    src_x=0.72 * THUMB_SIZE[0], src_y=0.3 * THUMB_SIZE[1],
+    src_r=1.0, src_g=1.0, src_b=1.0,
+    source_intensity=8.0, flare_gain=10.0, fov_h_deg=40.0,
+    ray_grid=32, aperture_blades=0, aperture_rotation=0.0,
+    ghost_blur=0.003, ghost_blur_passes=3, exposure=0.25,
+    draw_source=1, accumulate=0, seed=0)
+THUMB_PASSES = 2
+
+
+def thumbnail_path(lens_path):
+    """Cache file for a lens's thumbnail; changes when the .lens file does."""
+    try:
+        st = os.stat(lens_path)
+        stamp = '%d:%d' % (int(st.st_mtime), st.st_size)
+    except OSError:
+        stamp = ''
+    key = '%s|%s|%d' % (os.path.normcase(os.path.abspath(lens_path)), stamp, THUMB_VERSION)
+    digest = hashlib.sha1(key.encode('utf-8')).hexdigest()
+    return os.path.join(THUMB_DIR, digest[:2], digest + '.png')
+
+
+class ThumbnailRenderer(QtCore.QObject):
+    """Loads cached thumbnails, or renders and caches them, on a background
+    thread, in the order given to prioritize()."""
+
+    thumbReady = QtCore.Signal(str, object)   # lens path, QImage
+
+    def __init__(self, lib, parent=None):
+        super(ThumbnailRenderer, self).__init__(parent)
+        self._lib = lib
+        self._handle = lib.fsp_create()
+        self._cond = threading.Condition()
+        self._queue = []
+        self._paused = False
+        self._stop = False
+        self._thread = threading.Thread(target=self._run, name='FlareSimThumbnails')
+        self._thread.daemon = True
+        self._thread.start()
+
+    def prioritize(self, paths):
+        """Replace the work queue: these lenses, in this order."""
+        with self._cond:
+            self._queue = list(paths)
+            self._cond.notify()
+
+    def set_paused(self, paused):
+        with self._cond:
+            self._paused = paused
+            self._cond.notify()
+
+    def stop(self):
+        with self._cond:
+            self._stop = True
+            self._cond.notify()
+        self._thread.join(2.0)
+        if not self._thread.is_alive() and self._handle:
+            self._lib.fsp_destroy(self._handle)
+            self._handle = None
+
+    def _render(self, lens_path):
+        if self._lib.fsp_load_lens(self._handle, lens_path.encode('utf-8')) <= 0:
+            return None
+        w, h = THUMB_SIZE
+        buf = ctypes.create_string_buffer(w * h * 4)
+        params = FspParams(**THUMB_PARAMS)
+        for p in range(THUMB_PASSES):
+            params.accumulate, params.seed = int(p > 0), p * 7919 + 1
+            if self._lib.fsp_render(self._handle, ctypes.byref(params), w, h, buf) < 0:
+                return None
+        data = buf.raw   # keep alive until copied (see PreviewRenderer._render)
+        view = QtGui.QImage(data, w, h, w * 4, QtGui.QImage.Format_RGBA8888)
+        img = view.copy()
+        del view, data
+        return img
+
+    def _run(self):
+        while True:
+            with self._cond:
+                while not self._stop and (self._paused or not self._queue):
+                    self._cond.wait()
+                if self._stop:
+                    return
+                path = self._queue.pop(0)
+            try:
+                cache = thumbnail_path(path)
+                img = QtGui.QImage(cache) if os.path.isfile(cache) else None
+                if img is None or img.isNull():
+                    img = self._render(path)
+                    if img is not None:
+                        try:
+                            os.makedirs(os.path.dirname(cache), exist_ok=True)
+                            img.save(cache, 'PNG')
+                        except OSError:
+                            pass
+                if img is not None and not self._stop:
+                    self.thumbReady.emit(path, img)
+            except Exception as e:   # one bad lens must not stop the rest
+                sys.stderr.write('FlareSim thumbnail %s: %s\n' % (path, e))
+
+
 # ---------------------------------------------------------------------------
 # Widgets
 # ---------------------------------------------------------------------------
@@ -367,11 +477,12 @@ class PreviewView(QtWidgets.QWidget):
     exposure."""
 
     sourceMoved = QtCore.Signal(float, float, bool)   # u, v (0..1), dragging
+    dragStateChanged = QtCore.Signal(bool)
     exposureNudged = QtCore.Signal(float)
 
     def __init__(self, parent=None):
         super(PreviewView, self).__init__(parent)
-        self.setMinimumSize(480, 270)
+        self.setMinimumSize(320, 180)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.setMouseTracking(True)
         self.setCursor(QtCore.Qt.CrossCursor)
@@ -445,6 +556,7 @@ class PreviewView(QtWidgets.QWidget):
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             self._dragging = True
+            self.dragStateChanged.emit(True)
             self.source = self._event_pos(event)
             self.sourceMoved.emit(self.source[0], self.source[1], True)
             self.update()
@@ -458,6 +570,7 @@ class PreviewView(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event):
         if self._dragging and event.button() == QtCore.Qt.LeftButton:
             self._dragging = False
+            self.dragStateChanged.emit(False)
             self.source = self._event_pos(event)
             self.sourceMoved.emit(self.source[0], self.source[1], False)
             self.update()
@@ -470,6 +583,54 @@ class PreviewView(QtWidgets.QWidget):
     def resizeEvent(self, event):
         super(PreviewView, self).resizeEvent(event)
         self.sourceMoved.emit(self.source[0], self.source[1], False)
+
+
+class LensStrip(QtWidgets.QListWidget):
+    """The lens thumbnails.  Emits resized so the window can switch between
+    a one-row carousel and a wrapping grid as the strip is dragged taller."""
+
+    resized = QtCore.Signal()
+
+    def resizeEvent(self, event):
+        super(LensStrip, self).resizeEvent(event)
+        self.resized.emit()
+
+
+class LensTileDelegate(QtWidgets.QStyledItemDelegate):
+    """Draws a lens tile: the thumbnail, then the name and its focal length
+    and speed on one line each, elided to fit."""
+
+    SPEC_ROLE = QtCore.Qt.UserRole + 1
+
+    def paint(self, painter, option, index):
+        painter.save()
+        r = option.rect.adjusted(3, 3, -3, -3)
+        selected = bool(option.state & QtWidgets.QStyle.State_Selected)
+        if selected:
+            painter.fillRect(r, QtGui.QColor(61, 106, 153))
+        icon = index.data(QtCore.Qt.DecorationRole)
+        size = option.decorationSize
+        img_rect = QtCore.QRect(r.left() + (r.width() - size.width()) // 2, r.top() + 3,
+                                size.width(), size.height())
+        if icon is not None:
+            icon.paint(painter, img_rect)
+        fm = option.fontMetrics
+        line = fm.height()
+        text_rect = QtCore.QRect(r.left() + 4, img_rect.bottom() + 4, r.width() - 8, line)
+        name = index.data(QtCore.Qt.DisplayRole) or ''
+        painter.setPen(QtGui.QColor(255, 255, 255) if selected else QtGui.QColor(210, 210, 210))
+        painter.drawText(text_rect, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter,
+                         fm.elidedText(name, QtCore.Qt.ElideRight, text_rect.width()))
+        spec = index.data(self.SPEC_ROLE) or ''
+        painter.setPen(QtGui.QColor(230, 230, 230) if selected else QtGui.QColor(140, 140, 140))
+        painter.drawText(text_rect.translated(0, line),
+                         QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter,
+                         fm.elidedText(spec, QtCore.Qt.ElideRight, text_rect.width()))
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        size = option.decorationSize
+        return QtCore.QSize(size.width() + 14, size.height() + 2 * option.fontMetrics.height() + 16)
 
 
 class SliderRow(QtWidgets.QWidget):
@@ -550,6 +711,12 @@ def _nuke_main_window():
     return None
 
 
+def _breakable(name):
+    """Let a long file name wrap at its underscores instead of widening the
+    panel."""
+    return name.replace('_', '_\u200b')
+
+
 def _node_alive(node):
     try:
         node.name()
@@ -565,7 +732,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.Window)
         self.setWindowTitle('FlareSim Lens Browser')
         self.setObjectName('FlareSimLensBrowser')
-        self.resize(1320, 760)
+        self.resize(1360, 860)
 
         self._node = None
         self._lenses = scan_lenses(lens_folders())
@@ -575,23 +742,34 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._look_name = ''
         self._source_colour = QtGui.QColor(255, 255, 255)
         self._surfaces = 0
+        self._items = {}               # lens path -> grid item
+        self._has_thumb = set()
 
         self._build_ui()
 
         lib, err = preview_library()
         self._renderer = None
+        self._thumbs = None
         if lib is not None:
             self._renderer = PreviewRenderer(lib, self)
             self._renderer.frameReady.connect(self._on_frame)
             self._renderer.lensLoaded.connect(self._on_lens_loaded)
+            self._thumbs = ThumbnailRenderer(lib, self)
+            self._thumbs.thumbReady.connect(self._on_thumbnail)
         else:
             self.view.message = err
+
+        self._thumb_timer = QtCore.QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.setInterval(80)
+        self._thumb_timer.timeout.connect(self._queue_thumbnails)
 
         self._refresh_timer = QtCore.QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(30)
         self._refresh_timer.timeout.connect(self._request_render)
 
+        self._restore_layout()
         self._apply_filters()
         self._refresh_looks()
 
@@ -603,19 +781,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root.addWidget(splitter)
 
-        # Left: lens picker.
+        # Left: find a lens, lens info, looks.
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 4, 0)
-
-        lens_box = QtWidgets.QGroupBox('Lens')
-        lg = QtWidgets.QVBoxLayout(lens_box)
+        find_box = QtWidgets.QGroupBox('Find a Lens')
+        filters = QtWidgets.QFormLayout(find_box)
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Search lenses (name, maker, 50mm, f/1.4...)')
         self.search.setClearButtonEnabled(True)
-        lg.addWidget(self.search)
-
-        filters = QtWidgets.QGridLayout()
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.addItems(TYPES)
         self.maker_combo = QtWidgets.QComboBox()
         counts = {}
         for l in self._lenses:
@@ -629,61 +805,47 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.speed_combo = QtWidgets.QComboBox()
         for label, _lo, _hi in SPEEDS:
             self.speed_combo.addItem(label)
-        self.type_combo = QtWidgets.QComboBox()
-        self.type_combo.addItems(TYPES)
-        filters.addWidget(self.maker_combo, 0, 0)
-        filters.addWidget(self.type_combo, 0, 1)
-        filters.addWidget(self.focal_combo, 1, 0)
-        filters.addWidget(self.speed_combo, 1, 1)
-        lg.addLayout(filters)
-
-        pick = QtWidgets.QHBoxLayout()
-        self.prev_btn = QtWidgets.QToolButton()
-        self.prev_btn.setArrowType(QtCore.Qt.LeftArrow)
-        self.prev_btn.setToolTip('Previous lens')
-        self.lens_combo = QtWidgets.QComboBox()
-        self.lens_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.lens_combo.setMinimumContentsLength(24)
-        self.lens_combo.setMaxVisibleItems(25)
-        self.next_btn = QtWidgets.QToolButton()
-        self.next_btn.setArrowType(QtCore.Qt.RightArrow)
-        self.next_btn.setToolTip('Next lens')
-        pick.addWidget(self.prev_btn)
-        pick.addWidget(self.lens_combo, 1)
-        pick.addWidget(self.next_btn)
-        lg.addLayout(pick)
         self.count_label = QtWidgets.QLabel()
         self.count_label.setStyleSheet('color: #999;')
-        lg.addWidget(self.count_label)
-        self.info_label = QtWidgets.QLabel()
-        self.info_label.setWordWrap(True)
-        self.info_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        lg.addWidget(self.info_label)
-        browse = QtWidgets.QPushButton('Open .lens File...')
-        browse.clicked.connect(self._browse_lens_file)
-        lg.addWidget(browse)
-        lv.addWidget(lens_box)
+        self.size_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.size_slider.setRange(50, 150)
+        self.size_slider.setValue(75)
+        self.size_slider.setToolTip('Thumbnail size when the lens strip shows more than '
+                                    'one row. A single row fills the strip.')
+        filters.addRow(self.search)
+        filters.addRow('Type', self.type_combo)
+        filters.addRow('Maker', self.maker_combo)
+        filters.addRow('Focal', self.focal_combo)
+        filters.addRow('Speed', self.speed_combo)
+        filters.addRow('Tile size', self.size_slider)
+        filters.addRow(self.count_label)
+        lv.addWidget(find_box)
 
-        look_box = QtWidgets.QGroupBox('Start From a Look')
-        lk = QtWidgets.QVBoxLayout(look_box)
-        self.look_combo = QtWidgets.QComboBox()
-        lk.addWidget(self.look_combo)
-        self.look_desc = QtWidgets.QLabel()
-        self.look_desc.setWordWrap(True)
-        self.look_desc.setStyleSheet('color: #999;')
-        lk.addWidget(self.look_desc)
-        load_look = QtWidgets.QPushButton('Load Look')
-        load_look.setToolTip('Load the look\'s lens and settings into this window.')
-        load_look.clicked.connect(self._load_look)
-        lk.addWidget(load_look)
-        lv.addWidget(look_box)
-        lv.addStretch(1)
-        splitter.addWidget(left)
+        self.grid = LensStrip()
+        self.grid.setViewMode(QtWidgets.QListView.IconMode)
+        self.grid.setResizeMode(QtWidgets.QListView.Adjust)
+        self.grid.setMovement(QtWidgets.QListView.Static)
+        self.grid.setUniformItemSizes(True)
+        self.grid.setWordWrap(True)
+        self.grid.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.grid.setTextElideMode(QtCore.Qt.ElideRight)
+        self.grid.setToolTip('Click a lens to preview it; double-click to apply it to the node.')
+        self.grid.setStyleSheet('QListWidget { background: #1b1b1b; }')
+        self.grid.setItemDelegate(LensTileDelegate(self.grid))
+        self._placeholder = None
+        for l in self._lenses:
+            item = QtWidgets.QListWidgetItem(l.name)
+            item.setData(QtCore.Qt.UserRole, l.path)
+            item.setData(LensTileDelegate.SPEC_ROLE, self._item_spec(l))
+            item.setToolTip('%s\n%s, %s\n%s' % (l.label, l.maker, l.kind,
+                                                os.path.basename(l.path)))
+            self.grid.addItem(item)
+            self._items[l.path] = item
+        self.grid.setMinimumHeight(90)
 
-        # Centre: preview.
         centre = QtWidgets.QWidget()
         cv = QtWidgets.QVBoxLayout(centre)
-        cv.setContentsMargins(4, 0, 4, 0)
+        cv.setContentsMargins(0, 4, 0, 0)
         self.view = PreviewView()
         cv.addWidget(self.view, 1)
         under = QtWidgets.QHBoxLayout()
@@ -702,12 +864,50 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.clear_bg_btn.clicked.connect(self._clear_background)
         under.addWidget(self.clear_bg_btn)
         cv.addLayout(under)
-        splitter.addWidget(centre)
+
+        # Centre: the live preview over the lens strip.  Drag the divider:
+        # a short strip is a one-row carousel, a taller one wraps into a grid.
+        self.view_split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        self.view_split.addWidget(centre)
+        self.view_split.addWidget(self.grid)
+        self.view_split.setCollapsible(0, False)
+        self.view_split.setCollapsible(1, False)
+        self.view_split.setStretchFactor(0, 1)
+        self.view_split.setStretchFactor(1, 0)
+        self.view_split.setSizes([620, 200])
+        splitter.addWidget(left)
+        splitter.addWidget(self.view_split)
 
         # Right: look controls and actions.
         right = QtWidgets.QWidget()
         rv = QtWidgets.QVBoxLayout(right)
         rv.setContentsMargins(4, 0, 0, 0)
+
+        lens_box = QtWidgets.QGroupBox('Lens')
+        lg = QtWidgets.QVBoxLayout(lens_box)
+        self.info_label = QtWidgets.QLabel()
+        self.info_label.setWordWrap(True)
+        self.info_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        lg.addWidget(self.info_label)
+        open_btn = QtWidgets.QPushButton('Open .lens File...')
+        open_btn.clicked.connect(self._browse_lens_file)
+        lg.addWidget(open_btn)
+        lv.addWidget(lens_box)
+
+        look_box = QtWidgets.QGroupBox('Start From a Look')
+        lk = QtWidgets.QVBoxLayout(look_box)
+        self.look_combo = QtWidgets.QComboBox()
+        lk.addWidget(self.look_combo)
+        self.look_desc = QtWidgets.QLabel()
+        self.look_desc.setWordWrap(True)
+        self.look_desc.setStyleSheet('color: #999;')
+        lk.addWidget(self.look_desc)
+        load_look = QtWidgets.QPushButton('Load Look')
+        load_look.setToolTip('Load the look\'s lens and settings into this window.')
+        load_look.clicked.connect(self._load_look)
+        lk.addWidget(load_look)
+        lv.addWidget(look_box)
+        lv.addStretch(1)
 
         flare_box = QtWidgets.QGroupBox('Flare Look')
         fl = QtWidgets.QFormLayout(flare_box)
@@ -772,26 +972,39 @@ class LensBrowserWindow(QtWidgets.QWidget):
         actions.addWidget(save_btn)
         actions.addWidget(from_node)
         rv.addLayout(actions)
-        splitter.addWidget(right)
 
+        # The controls scroll when the window is short.
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(right)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        splitter.addWidget(scroll)
+        scroll.setMinimumWidth(right.minimumSizeHint().width() +
+                               scroll.verticalScrollBar().sizeHint().width() + 4)
+        scroll.setMaximumWidth(scroll.minimumWidth() + 120)
+        self.exposure.setMinimumWidth(160)
         left.setMinimumWidth(260)
-        left.setMaximumWidth(380)
-        right.setMinimumWidth(300)
-        right.setMaximumWidth(400)
-        self.exposure.setMinimumWidth(180)
+        left.setMaximumWidth(400)
         splitter.setCollapsible(1, False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([300, 700, 320])
+        splitter.setSizes([300, 900, 330])
+        self.main_split = splitter
 
         # Signals.
         self.search.textChanged.connect(self._apply_filters)
         for combo in (self.maker_combo, self.focal_combo, self.speed_combo, self.type_combo):
             combo.currentIndexChanged.connect(self._apply_filters)
-        self.lens_combo.currentIndexChanged.connect(self._on_lens_picked)
-        self.prev_btn.clicked.connect(lambda: self._step_lens(-1))
-        self.next_btn.clicked.connect(lambda: self._step_lens(1))
+        self.grid.currentItemChanged.connect(self._on_lens_picked)
+        self.grid.itemDoubleClicked.connect(lambda _item: self._apply_to_node())
+        self.grid.verticalScrollBar().valueChanged.connect(
+            lambda _v: self._thumb_timer.start())
+        self.grid.horizontalScrollBar().valueChanged.connect(
+            lambda _v: self._thumb_timer.start())
+        self.size_slider.valueChanged.connect(self._layout_strip)
+        self.grid.resized.connect(self._layout_strip)
         self.look_combo.currentIndexChanged.connect(self._show_look_info)
         for row in (self.gain, self.blades, self.rotation, self.blur, self.blur_passes,
                     self.intensity, self.fov, self.exposure):
@@ -799,6 +1012,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.quality.currentIndexChanged.connect(self._schedule_render)
         self.show_source.toggled.connect(self._schedule_render)
         self.view.sourceMoved.connect(self._on_source_moved)
+        self.view.dragStateChanged.connect(self._on_drag_state)
         self.view.exposureNudged.connect(
             lambda d: self.exposure.setValue(self.exposure.value() + d))
 
@@ -811,6 +1025,65 @@ class LensBrowserWindow(QtWidgets.QWidget):
 
     # -- lens list ------------------------------------------------------
 
+    @staticmethod
+    def _item_spec(l):
+        bits = []
+        if l.focal > 0:
+            bits.append('%gmm' % round(l.focal, 1))
+        if l.fnum > 0:
+            bits.append('f/%g' % l.fnum)
+        return '  '.join(bits) or l.maker
+
+    def _layout_strip(self, *_args):
+        """Fit the tiles to the lens strip: one row of tiles as tall as the
+        strip allows (a carousel), or, once two rows of slider-sized tiles fit,
+        a wrapping grid of those."""
+        g = self.grid
+        line = g.fontMetrics().height()
+        text_h = 2 * line + 16
+        aspect = THUMB_SIZE[0] / float(THUMB_SIZE[1])
+        avail = g.height() - 2 * g.frameWidth() - 4
+        tile_h = int(THUMB_SIZE[1] * self.size_slider.value() / 100.0)
+        if avail >= 2 * (tile_h + text_h):
+            wrap = True
+        else:
+            wrap = False
+            bar = g.horizontalScrollBar().sizeHint().height()
+            tile_h = max(40, min(int(THUMB_SIZE[1] * 1.6), avail - bar - text_h))
+        tile_w = int(tile_h * aspect)
+        if g.isWrapping() != wrap or g.flow() != (QtWidgets.QListView.LeftToRight):
+            g.setFlow(QtWidgets.QListView.LeftToRight)
+            g.setWrapping(wrap)
+            g.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff if wrap
+                                           else QtCore.Qt.ScrollBarAsNeeded)
+            g.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded if wrap
+                                         else QtCore.Qt.ScrollBarAlwaysOff)
+        size = QtCore.QSize(tile_w, tile_h)
+        if g.iconSize() != size:
+            g.setIconSize(size)
+            g.setGridSize(QtCore.QSize(tile_w + 14, tile_h + text_h))
+        current = g.currentItem()
+        if current is not None:
+            g.scrollToItem(current)
+        if hasattr(self, '_thumb_timer'):   # not yet while building the UI
+            self._thumb_timer.start()
+
+    def _placeholder_icon(self):
+        if self._placeholder is None:
+            pm = QtGui.QPixmap(*THUMB_SIZE)
+            pm.fill(QtGui.QColor(12, 12, 12))
+            p = QtGui.QPainter(pm)
+            p.setPen(QtGui.QColor(90, 90, 90))
+            p.drawText(pm.rect(), QtCore.Qt.AlignCenter,
+                       'rendering...' if self._thumbs else 'no preview')
+            p.end()
+            self._placeholder = QtGui.QIcon(pm)
+        return self._placeholder
+
+    def _visible_items(self):
+        return [self.grid.item(i) for i in range(self.grid.count())
+                if not self.grid.item(i).isHidden()]
+
     def _apply_filters(self, *_args):
         terms = self.search.text().strip().lower().split()
         maker = self.maker_combo.currentData()
@@ -819,43 +1092,82 @@ class LensBrowserWindow(QtWidgets.QWidget):
         kind = self.type_combo.currentText()
         out = []
         for l in self._lenses:
+            ok = True
             if maker and l.maker != maker:
-                continue
-            if self.focal_combo.currentIndex() and not (flo <= l.focal < fhi):
-                continue
-            if self.speed_combo.currentIndex() and not (l.fnum > 0 and slo <= l.fnum < shi):
-                continue
-            if self.type_combo.currentIndex() and l.kind != kind:
-                continue
-            if any(t not in l.search for t in terms):
-                continue
-            out.append(l)
+                ok = False
+            elif self.focal_combo.currentIndex() and not (flo <= l.focal < fhi):
+                ok = False
+            elif self.speed_combo.currentIndex() and not (l.fnum > 0 and slo <= l.fnum < shi):
+                ok = False
+            elif self.type_combo.currentIndex() and l.kind != kind:
+                ok = False
+            elif any(t not in l.search for t in terms):
+                ok = False
+            item = self._items[l.path]
+            item.setHidden(not ok)
+            if ok:
+                out.append(l)
+                if l.path not in self._has_thumb:
+                    item.setIcon(self._placeholder_icon())
         self._filtered = out
-        self.count_label.setText('%d of %d lenses' % (len(out), len(self._lenses)))
+        self.count_label.setText('%d of %d' % (len(out), len(self._lenses)))
 
-        self.lens_combo.blockSignals(True)
-        self.lens_combo.clear()
-        for l in out:
-            self.lens_combo.addItem(l.label, l.path)
         # Keep the current lens when it passes the filters; otherwise show
         # the first match.
-        index = self.lens_combo.findData(self._lens_path)
-        self.lens_combo.setCurrentIndex(index if index >= 0 else (0 if out else -1))
-        self.lens_combo.blockSignals(False)
-        if index < 0 and out:
-            self._on_lens_picked(0)
+        current = self._items.get(self._lens_path)
+        if current is not None and not current.isHidden():
+            self._select_item(current)
+        elif out:
+            self.set_lens(out[0].path)
+        self._thumb_timer.start()
 
-    def _on_lens_picked(self, index):
-        if index < 0:
+    def _queue_thumbnails(self):
+        """Ask for thumbnails of the lenses on screen first, then the rest of
+        the filtered list."""
+        if self._thumbs is None:
             return
-        path = self.lens_combo.itemData(index)
+        vp = self.grid.viewport().rect()
+        on_screen, rest = [], []
+        for l in self._filtered:
+            if l.path in self._has_thumb:
+                continue
+            item = self._items[l.path]
+            (on_screen if self.grid.visualItemRect(item).intersects(vp) else rest).append(l.path)
+        self._thumbs.prioritize(on_screen + rest)
+
+    def _on_thumbnail(self, path, image):
+        item = self._items.get(path)
+        if item is None:
+            return
+        item.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(image)))
+        self._has_thumb.add(path)
+
+    def _on_drag_state(self, dragging):
+        # Give the live preview the CPU while the light is being dragged.
+        if self._thumbs is not None:
+            self._thumbs.set_paused(dragging)
+
+    def _select_item(self, item):
+        if self.grid.currentItem() is not item:
+            self.grid.blockSignals(True)
+            self.grid.setCurrentItem(item)
+            self.grid.blockSignals(False)
+        self.grid.scrollToItem(item)
+
+    def _on_lens_picked(self, item, _previous=None):
+        if item is None:
+            return
+        path = item.data(QtCore.Qt.UserRole)
         if path and path != self._lens_path:
             self.set_lens(path)
 
     def _step_lens(self, delta):
-        n = self.lens_combo.count()
-        if n:
-            self.lens_combo.setCurrentIndex((self.lens_combo.currentIndex() + delta) % n)
+        items = self._visible_items()
+        if not items:
+            return
+        current = self._items.get(self._lens_path)
+        i = items.index(current) if current in items else -1
+        self.set_lens(items[(i + delta) % len(items)].data(QtCore.Qt.UserRole))
 
     def _browse_lens_file(self):
         start = os.path.dirname(self._lens_path) if self._lens_path else BUNDLED_LENS_ROOT
@@ -865,14 +1177,13 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self.set_lens(path)
 
     def set_lens(self, path):
-        """Show a lens: select it in the dropdown (if listed) and preview it."""
+        """Show a lens: select it in the grid (if listed) and preview it."""
         self._lens_path = path.replace('\\', '/')
-        index = self.lens_combo.findData(self._lens_path)
-        if index >= 0 and index != self.lens_combo.currentIndex():
-            self.lens_combo.blockSignals(True)
-            self.lens_combo.setCurrentIndex(index)
-            self.lens_combo.blockSignals(False)
-        self.lens_combo.setToolTip(self.lens_combo.currentText())
+        item = self._items.get(self._lens_path)
+        if item is not None and not item.isHidden():
+            self._select_item(item)
+        else:
+            self.grid.clearSelection()
         self._surfaces = 0
         self._update_info()
         self._schedule_render()
@@ -900,7 +1211,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             bits.append('%d ghosts' % pairs)
         if bits:
             lines.append(', '.join(bits))
-        lines.append('<span style="color:#888">%s</span>' % os.path.basename(info.path))
+        lines.append('<span style="color:#888">%s</span>' % _breakable(os.path.basename(info.path)))
         self.info_label.setText('<br>'.join(lines))
 
     # -- looks ----------------------------------------------------------
@@ -924,7 +1235,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             look = self._looks[i]
             text = look.get('description', '')
             if look.get('lens'):
-                text += ('\n' if text else '') + 'Lens: %s' % os.path.basename(look['lens'])
+                text += ('\n' if text else '') + 'Lens: %s' % _breakable(os.path.basename(look['lens']))
             self.look_desc.setText(text)
         else:
             self.look_desc.setText('No looks found.')
@@ -1177,12 +1488,41 @@ class LensBrowserWindow(QtWidgets.QWidget):
         super(LensBrowserWindow, self).showEvent(event)
         self._update_target_label()
         self._schedule_render()
+        self._thumb_timer.start()
+
+    def resizeEvent(self, event):
+        super(LensBrowserWindow, self).resizeEvent(event)
+        if hasattr(self, '_thumb_timer'):
+            self._thumb_timer.start()
+
+    def _settings(self):
+        return QtCore.QSettings('FlareSim', 'LensBrowser')
+
+    def _restore_layout(self):
+        """Window size and divider positions from the last session."""
+        st = self._settings()
+        for key, restore in (('geometry', self.restoreGeometry),
+                             ('main_split', self.main_split.restoreState),
+                             ('view_split', self.view_split.restoreState)):
+            value = st.value(key)
+            if value is not None:
+                restore(value)
+
+    def _save_layout(self):
+        st = self._settings()
+        st.setValue('geometry', self.saveGeometry())
+        st.setValue('main_split', self.main_split.saveState())
+        st.setValue('view_split', self.view_split.saveState())
 
     def closeEvent(self, event):
         global _window
+        self._save_layout()
         if self._renderer is not None:
             self._renderer.stop()
             self._renderer = None
+        if self._thumbs is not None:
+            self._thumbs.stop()
+            self._thumbs = None
         if _window is self:
             _window = None
         super(LensBrowserWindow, self).closeEvent(event)

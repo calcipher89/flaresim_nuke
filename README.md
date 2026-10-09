@@ -187,7 +187,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim Lens Browser**) opens a window for picking a lens and building a look before you render:
 
-- **Lens**: pick from the dropdown, narrowed by the search box and the maker, type (cine, stills, anamorphic), focal length and speed filters. The arrows (or Page Up / Page Down) step through the matches.
+- **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
 - **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it.
 - **Flare Look**: Gain, aperture Blades and Rotation, Ghost Blur. These are the node's knobs.
 - **Preview Light and Camera**: light intensity and colour, FOV and preview quality. These only shape the preview; the node keeps its own source and camera settings.
