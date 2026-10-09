@@ -132,6 +132,77 @@ static void box_blur(float* buf, int w, int h, int radius, int passes,
     }
 }
 
+// ---------------------------------------------------------------------------
+// cluster_sources — merge nearby bright sources into fewer, stronger ones.
+// Ported from the original FlareSim (LocalStarlight/flaresim_nuke).
+//
+// Sources within radius_px pixels of a cluster seed are absorbed into it.
+// Position becomes the luma-weighted centroid; RGB values are summed so the
+// merged source carries the combined energy.  Greedy O(n²), seeded in
+// descending-luma order so the brightest source anchors each cluster.
+// ---------------------------------------------------------------------------
+
+static void cluster_sources(std::vector<BrightPixel>& sources,
+                            int   radius_px,
+                            int   fmt_w,
+                            float tan_half_h)
+{
+    if (radius_px <= 0 || (int)sources.size() < 2 || fmt_w <= 0) return;
+
+    // 1 pixel ≈ 2*tan_half_h / fmt_w radians at the image centre.
+    const float ang_per_px = 2.0f * tan_half_h / (float)fmt_w;
+    const float thresh     = (float)radius_px * ang_per_px;
+    const float thresh_sq  = thresh * thresh;
+
+    auto luma_of = [](const BrightPixel& p) {
+        return 0.2126f*p.r + 0.7152f*p.g + 0.0722f*p.b;
+    };
+    std::sort(sources.begin(), sources.end(),
+              [&](const BrightPixel& a, const BrightPixel& b) {
+                  return luma_of(a) > luma_of(b);
+              });
+
+    const int n = (int)sources.size();
+    std::vector<bool> consumed(n, false);
+    std::vector<BrightPixel> out;
+    out.reserve(n);
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (consumed[i]) continue;
+
+        const BrightPixel& seed = sources[i];
+        float sum_w = luma_of(seed);
+        float ax = seed.angle_x * sum_w;
+        float ay = seed.angle_y * sum_w;
+        float r  = seed.r, g = seed.g, b = seed.b;
+
+        for (int j = i + 1; j < n; ++j)
+        {
+            if (consumed[j]) continue;
+            const BrightPixel& t = sources[j];
+            const float dx = seed.angle_x - t.angle_x;
+            const float dy = seed.angle_y - t.angle_y;
+            if (dx*dx + dy*dy <= thresh_sq) {
+                const float lt = luma_of(t);
+                r += t.r;  g += t.g;  b += t.b;
+                ax    += t.angle_x * lt;
+                ay    += t.angle_y * lt;
+                sum_w += lt;
+                consumed[j] = true;
+            }
+        }
+
+        BrightPixel merged;
+        merged.angle_x = (sum_w > 0.0f) ? ax / sum_w : seed.angle_x;
+        merged.angle_y = (sum_w > 0.0f) ? ay / sum_w : seed.angle_y;
+        merged.r = r;  merged.g = g;  merged.b = b;
+        out.push_back(merged);
+    }
+
+    sources = std::move(out);
+}
+
 // ===========================================================================
 // Per-surface toggle + gain knob name storage
 // ===========================================================================
@@ -217,6 +288,14 @@ public:
     int         source_mode_;
     int         source_downsample_;   // block size for auto-detect downsample (px)
     int         max_sources_;         // cap on emitted auto-detect sources
+    float       source_cap_;          // max raw plate luma per auto-detect source; 0 = off
+    int         cluster_radius_;      // merge auto-detect sources closer than this (px); 0 = off
+
+    // Viewer overlay of detected sources:
+    //   0 = Flare, 1 = Flare + Sources, 2 = Sources Only (skips the ghost render)
+    int         source_view_;
+    struct SourceMarker { int x0, y0, x1, y1; float r, g, b; };
+    std::vector<SourceMarker> source_markers_;  // written under compute_mutex_
 
     // Off-screen source: when Source XY is outside the frame, use these
     // instead of sampling the image.  The flare keeps rendering seamlessly.
@@ -302,7 +381,7 @@ public:
         , source_intensity_(8.0f)
         , flare_gain_(10.0f)
         , ray_grid_(64)
-        , threshold_(0.0f)
+        , threshold_(0.9f)
         , fov_use_sensor_(false)
         , sensor_preset_(0)
         , fov_h_deg_(40.0f)
@@ -328,9 +407,12 @@ public:
         , highlight_knee_(0.5f)
         , highlight_metric_(1)
         , manual_sample_radius_(4)
-        , source_mode_(0)              // default: Manual XY
+        , source_mode_(1)              // default: Auto Detect
         , source_downsample_(4)
         , max_sources_(64)
+        , source_cap_(0.0f)
+        , cluster_radius_(0)
+        , source_view_(0)
         , outside_source_enable_(true)
         , outside_source_intensity_(8.0f)
         , outside_source_falloff_(0.0f)
@@ -481,6 +563,105 @@ public:
         File_knob(f, &lens_file_,  "lens_file",      "Lens File");
         Tooltip(f, "Path to a .lens prescription file.");
 
+        Divider(f, "Source");
+        static const char* const kSourceModes[] = {
+            "Manual XY", "Auto Detect", nullptr
+        };
+        Enumeration_knob(f, &source_mode_, kSourceModes, "source_mode", "Source Mode");
+        Tooltip(f, "How bright sources are located in the input:\n"
+                   "Auto Detect (default): every bright light in the plate above "
+                     "Threshold becomes a flare source.  Use View = Sources Only to "
+                     "see which lights are picked up.\n"
+                   "Manual XY: a single source at the XY knob below (track a light "
+                     "source manually or link to a Tracker).");
+
+        static const char* const kSourceViews[] = {
+            "Flare", "Flare + Sources", "Sources Only", nullptr
+        };
+        Enumeration_knob(f, &source_view_, kSourceViews, "source_view", "View");
+        Tooltip(f, "What the node outputs while you set up the sources:\n"
+                   "Flare: the lens flare only (use this for renders).\n"
+                   "Flare + Sources: the flare with a square drawn on every "
+                     "detected source.\n"
+                   "Sources Only: just the source squares, without rendering the "
+                     "flare.  Fast for tuning Threshold, Source Cap, Cluster "
+                     "Radius and Max Sources.");
+
+        XY_knob(f, manual_xy_, "manual_xy", "Source XY");
+        Tooltip(f, "Pixel position of the flare source.  Animatable — link to a "
+                   "Tracker node's tracking output for stabilised flares.\n\n"
+                   "The input image is sampled at this position: if the brightness "
+                   "exceeds Threshold a flare is produced; otherwise the output is black.");
+        Int_knob(f, &manual_sample_radius_, "manual_sample_radius", "Sample Radius");
+        Tooltip(f, "Radius (in pixels) of the area averaged around Source XY to "
+                   "determine source colour and brightness.  Larger values are more "
+                   "robust to sub-pixel tracking jitter.  Default 4.");
+        Float_knob(f, &source_intensity_,  "source_intensity",  "Source Intensity");
+        SetRange(f, 1.0, 50.0);
+        Tooltip(f, "How bright the light source is relative to the plate.\n\n"
+                   "Restores the HDR brightness the camera clipped.  "
+                   "Practical lamp = 2, headlight = 8, sun = 30.\n"
+                   "Default 8.");
+        Float_knob(f, &threshold_,  "threshold",     "Threshold");
+        SetRange(f, 0.0, 4.0);
+        Tooltip(f, "Minimum raw plate luminance for a flare to appear.\n\n"
+                   "The default 0.9 catches near-white and clipped lights "
+                   "(lamps, sun, specular hits).  Lower it to catch dimmer "
+                   "lights; raise it above 1 on HDR plates to keep only the "
+                   "hottest ones.  0 = any non-black pixel.\n\n"
+                   "In Manual XY mode, gates the single sampled source.  "
+                   "In Auto Detect mode, gates each downsampled block.");
+        Float_knob(f, &source_cap_, "source_cap", "Source Cap");
+        SetRange(f, 0.0, 10.0);
+        Tooltip(f, "Auto Detect: limits how bright any one source can be (in "
+                   "plate luminance) before it drives the flare.  Stops a "
+                   "very hot light, such as the sun, from overpowering the "
+                   "flares from the other lights.\n"
+                   "0 = off (default).");
+
+        Divider(f, "Source Extraction");
+        Int_knob(f, &source_downsample_, "source_downsample", "Downsample");
+        SetRange(f, 1.0, 16.0);
+        Tooltip(f, "Block size (in pixels) for downsampling input 0 when "
+                   "extracting sources in Auto Detect mode.  One BrightPixel "
+                   "is emitted per block whose average luma is above Threshold.  "
+                   "Larger = fewer sources, faster.  Default 4.");
+        Int_knob(f, &max_sources_, "max_sources", "Max Sources");
+        SetRange(f, 1.0, 512.0);
+        Tooltip(f, "Hard cap on the number of flare sources extracted in "
+                   "Auto Detect mode.  When more survive the Threshold, only "
+                   "the brightest Max Sources are kept.  Default 64.");
+        Int_knob(f, &cluster_radius_, "cluster_radius", "Cluster Radius");
+        SetRange(f, 0.0, 100.0);
+        Tooltip(f, "Auto Detect: merges sources closer together than this "
+                   "many pixels into one stronger source at their centre.\n\n"
+                   "A large light such as a headlight or the sun is detected as "
+                   "many neighbouring blocks, which stack near-identical ghosts.  "
+                   "Clustering turns them into one clean flare and renders faster.  "
+                   "Start near the size of your brightest light in pixels "
+                   "(for example 20 to 50 for a headlight).\n"
+                   "0 = off (default).");
+
+        Divider(f, "Outside Source");
+        Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
+        Tooltip(f, "When the Source XY is outside the frame, use the colour "
+                   "and intensity below instead of sampling the image.  "
+                   "The flare keeps rendering seamlessly as the source "
+                   "leaves or re-enters the plate.");
+        Color_knob(f, outside_source_color_, "outside_source_color", "Outside Color");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "RGB colour of the off-screen light source.  "
+                   "White (1, 1, 1) gives a neutral flare.");
+        Float_knob(f, &outside_source_intensity_, "outside_source_intensity", "Outside Intensity");
+        SetRange(f, 0.0, 50.0);
+        Tooltip(f, "Intensity of the off-screen source (same scale as Source Intensity).");
+        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Falloff (px)");
+        SetRange(f, 0.0, 200.0);
+        Tooltip(f, "Blend zone in pixels at the frame edge.  0 = hard switch "
+                   "(the image-sampled colour pops to outside colour instantly).  "
+                   "Higher values smoothly interpolate between the two near the edge.");
+
+
         Divider(f, "Ghost");
         Int_knob(f,   &ray_grid_,   "ray_grid",      "Ray Grid (NxN)");
         Tooltip(f, "NxN entrance-pupil samples per source. "
@@ -511,74 +692,6 @@ public:
                    "pattern regardless of frame number (useful for still renders or when you "
                    "need the exact same noise across multiple passes).\n\n"
                    "Only affects Stratified mode; ignored for Off and Halton.");
-
-        Divider(f, "Source");
-        static const char* const kSourceModes[] = {
-            "Manual XY", "Auto Detect", nullptr
-        };
-        Enumeration_knob(f, &source_mode_, kSourceModes, "source_mode", "Source Mode");
-        Tooltip(f, "How bright sources are located in the input:\n"
-                   "Manual XY: a single source at the XY knob below (track a light "
-                     "source manually or link to a Tracker).\n"
-                   "Auto Detect: scan input 0's RGB and emit a source for every "
-                     "region above the Threshold.  Downsample controls block size "
-                     "and Max Sources caps the total count.");
-
-        XY_knob(f, manual_xy_, "manual_xy", "Source XY");
-        Tooltip(f, "Pixel position of the flare source.  Animatable — link to a "
-                   "Tracker node's tracking output for stabilised flares.\n\n"
-                   "The input image is sampled at this position: if the brightness "
-                   "exceeds Threshold a flare is produced; otherwise the output is black.");
-        Int_knob(f, &manual_sample_radius_, "manual_sample_radius", "Sample Radius");
-        Tooltip(f, "Radius (in pixels) of the area averaged around Source XY to "
-                   "determine source colour and brightness.  Larger values are more "
-                   "robust to sub-pixel tracking jitter.  Default 4.");
-        Float_knob(f, &source_intensity_,  "source_intensity",  "Source Intensity");
-        SetRange(f, 1.0, 50.0);
-        Tooltip(f, "How bright the light source is relative to the plate.\n\n"
-                   "Restores the HDR brightness the camera clipped.  "
-                   "Practical lamp = 2, headlight = 8, sun = 30.\n"
-                   "Default 8.");
-        Float_knob(f, &threshold_,  "threshold",     "Threshold");
-        SetRange(f, 0.0, 1.0);
-        Tooltip(f, "Minimum raw plate luminance for a flare to appear.\n\n"
-                   "0 = always produce a flare (any non-black pixel).  "
-                   "0.5 = only above mid-grey.  1 = only pure white.\n"
-                   "Default 0.\n\n"
-                   "In Manual XY mode, gates the single sampled source.  "
-                   "In Auto Detect mode, gates each downsampled block.");
-
-        Divider(f, "Source Extraction");
-        Int_knob(f, &source_downsample_, "source_downsample", "Downsample");
-        SetRange(f, 1.0, 16.0);
-        Tooltip(f, "Block size (in pixels) for downsampling input 0 when "
-                   "extracting sources in Auto Detect mode.  One BrightPixel "
-                   "is emitted per block whose average luma is above Threshold.  "
-                   "Larger = fewer sources, faster.  Default 4.");
-        Int_knob(f, &max_sources_, "max_sources", "Max Sources");
-        SetRange(f, 1.0, 512.0);
-        Tooltip(f, "Hard cap on the number of flare sources extracted in "
-                   "Auto Detect mode.  When more survive the Threshold, only "
-                   "the brightest Max Sources are kept.  Default 64.");
-
-        Divider(f, "Outside Source");
-        Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
-        Tooltip(f, "When the Source XY is outside the frame, use the colour "
-                   "and intensity below instead of sampling the image.  "
-                   "The flare keeps rendering seamlessly as the source "
-                   "leaves or re-enters the plate.");
-        Color_knob(f, outside_source_color_, "outside_source_color", "Outside Color");
-        SetFlags(f, Knob::STARTLINE);
-        Tooltip(f, "RGB colour of the off-screen light source.  "
-                   "White (1, 1, 1) gives a neutral flare.");
-        Float_knob(f, &outside_source_intensity_, "outside_source_intensity", "Outside Intensity");
-        SetRange(f, 0.0, 50.0);
-        Tooltip(f, "Intensity of the off-screen source (same scale as Source Intensity).");
-        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Falloff (px)");
-        SetRange(f, 0.0, 200.0);
-        Tooltip(f, "Blend zone in pixels at the frame edge.  0 = hard switch "
-                   "(the image-sampled colour pops to outside colour instantly).  "
-                   "Higher values smoothly interpolate between the two near the edge.");
 
         Divider(f, "Camera");
         Bool_knob(f, &fov_use_sensor_, "fov_use_sensor", "Use Sensor Size");
@@ -742,6 +855,8 @@ public:
             // Auto Detect-only controls
             if (Knob* x = knob("source_downsample")) x->enable(is_auto);
             if (Knob* x = knob("max_sources"))       x->enable(is_auto);
+            if (Knob* x = knob("source_cap"))        x->enable(is_auto);
+            if (Knob* x = knob("cluster_radius"))    x->enable(is_auto);
         };
         if (k->is("showPanel")) {
             sync_source_mode_enabled();
@@ -937,6 +1052,8 @@ public:
             if (alpha_)   std::memset(alpha_,   0, npx * sizeof(uint16_t));
         };
 
+        source_markers_.clear();
+
         if (lens_.surfaces.empty()) { zero_buffers(); return; }
 
         const int x0 = pending_x0_;
@@ -1096,8 +1213,8 @@ public:
             // ================================================================
             // Auto Detect mode — scan input 0 RGB, emit a source for every
             // block whose average luma is >= threshold.  Matches the original
-            // FlareSim auto-detect algorithm: no clustering, just Downsample
-            // and Max Sources (brightness-sorted cap).
+            // FlareSim auto-detect algorithm: Downsample, Source Cap,
+            // Cluster Radius and Max Sources (brightness-sorted cap).
             // ================================================================
 
             const int ds = std::max(source_downsample_, 1);
@@ -1144,12 +1261,18 @@ public:
                     if (cnt == 0) continue;
 
                     const float inv_cnt = 1.0f / (float)cnt;
-                    const float r = blk_r[idx] * inv_cnt;
-                    const float g = blk_g[idx] * inv_cnt;
-                    const float b = blk_b[idx] * inv_cnt;
+                    float r = blk_r[idx] * inv_cnt;
+                    float g = blk_g[idx] * inv_cnt;
+                    float b = blk_b[idx] * inv_cnt;
 
                     const float luma = 0.2126f*r + 0.7152f*g + 0.0722f*b;
                     if (luma < threshold_) continue;
+
+                    // Source Cap: scale hot blocks down to the cap luma.
+                    if (source_cap_ > 0.0f && luma > source_cap_) {
+                        const float k = source_cap_ / luma;
+                        r *= k;  g *= k;  b *= k;
+                    }
 
                     const int bx0 = x0 + dxi * ds;
                     const int bx1 = std::min(bx0 + ds, x1);
@@ -1171,6 +1294,11 @@ public:
                 }
             }
 
+            // Merge neighbouring blocks before the Max Sources cap, so the
+            // cap counts lights rather than blocks.
+            if (cluster_radius_ > 0)
+                cluster_sources(sources, cluster_radius_, pending_fmt_w_, tan_half_h);
+
             // Cap total sources — keep the brightest.
             const int cap = std::max(max_sources_, 1);
             if ((int)sources.size() > cap) {
@@ -1183,6 +1311,28 @@ public:
             }
         } // end Auto Detect mode
         last_src_count_.store((int)sources.size());
+
+        // ---- Source markers for View = Flare + Sources / Sources Only ----
+        if (source_view_ != 0)
+        {
+            const int half = (source_mode_ == 0)
+                ? std::max(manual_sample_radius_, 3)
+                : std::max(source_downsample_ / 2, 3);
+            for (const BrightPixel& bp : sources)
+            {
+                const float ndc_x = std::tan(bp.angle_x) / (2.0f * tan_half_h);
+                const float ndc_y = std::tan(bp.angle_y) / (2.0f * tan_half_v);
+                const int cx = (int)std::round(ndc_x * pending_fmt_w_ + fmt_cx);
+                const int cy = (int)std::round(ndc_y * pending_fmt_h_ + fmt_cy);
+                // Show the source's hue at full brightness so it stays
+                // readable whatever Source Intensity is.
+                const float peak = std::max({bp.r, bp.g, bp.b, 1e-6f});
+                source_markers_.push_back({cx - half, cy - half,
+                                           cx + half + 1, cy + half + 1,
+                                           bp.r / peak, bp.g / peak, bp.b / peak});
+            }
+        }
+        if (source_view_ == 2) { zero_buffers(); return; }
 
         if (Op::aborted()) { zero_buffers(); return; }
 
@@ -1411,6 +1561,26 @@ public:
         write_buf(Chan_Green, ghost_g_);
         write_buf(Chan_Blue,  ghost_b_);
         write_buf(Chan_Alpha, alpha_);
+
+        // Draw source markers on top (View = Flare + Sources / Sources Only).
+        if (source_view_ != 0 && frame_ok)
+        {
+            std::lock_guard<std::mutex> lock(compute_mutex_);
+            for (const SourceMarker& m : source_markers_)
+            {
+                if (y < m.y0 || y >= m.y1) continue;
+                const int mx0 = std::max(x, m.x0);
+                const int mx1 = std::min(r, m.x1);
+                if (mx0 >= mx1) continue;
+                const float vals[4] = { m.r, m.g, m.b, 1.0f };
+                const Channel chans[4] = { Chan_Red, Chan_Green, Chan_Blue, Chan_Alpha };
+                for (int c = 0; c < 4; ++c) {
+                    if (!channels.contains(chans[c])) continue;
+                    float* dst = row.writable(chans[c]);
+                    for (int i = mx0; i < mx1; ++i) dst[i] = vals[c];
+                }
+            }
+        }
     }
 
     // ---- _request ----

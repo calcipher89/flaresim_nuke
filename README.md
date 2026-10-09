@@ -165,9 +165,14 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 1. Connect your plate to the input.
 2. Point **Lens File** at a `.lens` prescription, or pick one in the **Lens Browser**.
 3. Set **FOV H** to match your camera.
-4. Choose a **Source Mode**:
-   - **Auto Detect** — every bright area of the plate becomes a flare source. Raise **Threshold** until only the lights you want are flaring, and use **Max Sources** to cap how many are traced.
-   - **Manual XY** — one source at **Source XY** (animate it or link it to a Tracker).
+4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
+   - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
+   - Adjust **Threshold** until only the lights you want are marked.
+   - Raise **Cluster Radius** so each large light (a headlight, the sun) counts as one source instead of many.
+   - Use **Source Cap** to stop one very hot light from overpowering the rest, and **Max Sources** to cap how many are traced.
+   - Set **View** back to **Flare** for renders.
+
+   For a single tracked light instead, switch **Source Mode** to **Manual XY** and animate **Source XY** or link it to a Tracker.
 5. Adjust **Flare Gain** to taste.
 
 **FlareSim3D** (3D source):
