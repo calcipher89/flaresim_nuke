@@ -32,6 +32,16 @@ When the light source moves outside the frame, the flare no longer vanishes. A u
 - **Outside Intensity** — brightness of the off-screen source
 - **Edge Falloff (px)** — blend zone at the frame edge for smooth transitions
 
+### Occlusion Matte
+
+A light that goes behind a foreground object stops flaring. Connect a roto, or the object's alpha, to the **matte** input (input 1 on FlareSim, input 3 on FlareSim3D). The node measures how much of a small disc around the light the matte covers and dims the flare by that much, so a light sliding behind an edge fades out instead of popping off.
+
+- **Matte Mode** — **Occlude** (default): white in the matte hides the light. **Mask**: white lets the light through, so only lights inside the white area flare (what the input was meant for in the original FlareSim).
+- **Light Size** — diameter in pixels of the light as the matte sees it. Bigger gives a slower fade across an edge. Default 8.
+- Manual XY and FlareSim3D measure at the light's position (FlareSim3D uses where the Axis projects through the Camera). Auto Detect dims each detected light at its own spot, before **Max Sources**, so hidden lights don't use up places.
+- Lights outside the frame (Outside Source) are not affected.
+- The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
+
 ### Spectral Jitter
 
 Randomises each ray's wavelength within its spectral bin, smoothing the hard colour boundaries between discrete samples at zero extra ray-trace cost — same number of traces, each one uses a slightly different wavelength.
@@ -182,6 +192,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 3. The flare tracks the Axis through the Camera automatically.
 4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
 5. Enable **Outside Source** so the flare persists when the source leaves the frame.
+6. If the light passes behind something, connect a matte of it to the **matte** input (see Occlusion Matte).
 
 ### Lens Browser
 
