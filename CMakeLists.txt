@@ -14,6 +14,9 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 #   FLARESIM_BUILD_PLUGINS  (ON)  build FlareSim + FlareSim3D for Nuke
 #   FLARESIM_BUILD_TESTS    (ON)  build the CPU-only optics smoke test
 #
+# The flaresim_preview library (live preview in the Lens Browser window) is
+# CPU-only and is built in every configuration.
+#
 # The smoke test needs no Nuke, CUDA or Metal:
 #   cmake -S . -B build-tests -DFLARESIM_BUILD_PLUGINS=OFF
 #   cmake --build build-tests && ctest --test-dir build-tests
@@ -75,7 +78,29 @@ set(FLARESIM_CORE_SOURCES
 )
 
 # ===========================================================================
-# Smoke test (CPU only)
+# Preview library (CPU only) — loaded by the Lens Browser window via ctypes
+# ===========================================================================
+add_library(flaresim_preview SHARED src/preview.cpp ${FLARESIM_CORE_SOURCES})
+target_include_directories(flaresim_preview PRIVATE src)
+target_compile_definitions(flaresim_preview PRIVATE FLARESIM_PREVIEW_BUILD)
+find_package(Threads REQUIRED)
+target_link_libraries(flaresim_preview PRIVATE Threads::Threads)
+set_target_properties(flaresim_preview PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
+if(MSVC)
+    target_compile_options(flaresim_preview PRIVATE /O2 /EHsc /W3 /wd4244 /wd4267 /wd4305)
+else()
+    target_compile_options(flaresim_preview PRIVATE -O3 -Wall -Wno-deprecated-declarations)
+endif()
+# Same file name on every platform: flaresim_preview.dll / .so / .dylib
+set_target_properties(flaresim_preview PROPERTIES PREFIX "")
+if(APPLE)
+    set_target_properties(flaresim_preview PROPERTIES SUFFIX ".dylib")
+endif()
+
+# ===========================================================================
+# Tests (CPU only)
 # ===========================================================================
 if(FLARESIM_BUILD_TESTS)
     enable_testing()
@@ -85,6 +110,13 @@ if(FLARESIM_BUILD_TESTS)
         target_compile_options(flaresim_smoke PRIVATE -Wall -Wno-deprecated-declarations)
     endif()
     add_test(NAME optics_smoke COMMAND flaresim_smoke)
+
+    add_executable(flaresim_preview_test src/preview_test.cpp)
+    target_include_directories(flaresim_preview_test PRIVATE src)
+    target_link_libraries(flaresim_preview_test PRIVATE flaresim_preview)
+    add_test(NAME preview_render
+             COMMAND flaresim_preview_test
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lenses/lens_files/Zeiss_50mm_F1.4_(Zeiss_Biotar_50mm_F1.4).lens")
 endif()
 
 if(NOT FLARESIM_BUILD_PLUGINS)
@@ -302,7 +334,7 @@ endforeach()
 #
 #   cmake --install build --prefix ~/.nuke/plugins/FlareSim
 # ===========================================================================
-install(TARGETS ${FLARESIM_TARGETS}
+install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
 install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py nuke/FlareSim_Looks.py DESTINATION .)
@@ -319,6 +351,7 @@ message(STATUS "  Nuke version : ${NUKE_VERSION}")
 message(STATUS "  NDK include  : ${NDK_ROOT}")
 message(STATUS "  Nuke libs    : ${NUKE_LIB_DIR}")
 message(STATUS "  Backend      : ${_backend_summary}")
+message(STATUS "  Preview lib  : flaresim_preview (CPU)")
 message(STATUS "  C++ standard : ${CMAKE_CXX_STANDARD}")
 message(STATUS "========================================")
 message(STATUS "")

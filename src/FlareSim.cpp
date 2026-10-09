@@ -564,9 +564,10 @@ public:
         Tooltip(f, "Path to a .lens prescription file.");
         PyScript_knob(f, "import FlareSim_LensBrowser\n"
                          "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
-                      "lens_browser", "Lens & Looks...");
-        Tooltip(f, "Open the Lens Browser for this node: filter and pick a "
-                   "lens, or apply and save looks.");
+                      "lens_browser", "Lens Browser");
+        Tooltip(f, "Open the Lens Browser window for this node: browse and "
+                   "filter lenses with a live flare preview, start from a look, "
+                   "then apply it to this node or save it as a look.");
 
         Divider(f, "Source");
         static const char* const kSourceModes[] = {
