@@ -1979,7 +1979,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
             row._sync_slider(row.value())
         c = state['color']
         swatch = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
-        label = '' if all(abs(v - 1.0) < 1e-6 for v in c) else '%.2f  %.2f  %.2f' % tuple(c)
+        label = 'None (click to pick)' if all(abs(v - 1.0) < 1e-6 for v in c) else \
+            '%.2f  %.2f  %.2f' % tuple(c)
         self.surf_colour_btn.setText(label)
         text_colour = '#000' if swatch.lightnessF() > 0.5 else '#fff'
         self.surf_colour_btn.setStyleSheet('background-color: %s; color: %s; min-height: 18px;'
@@ -1998,15 +1999,55 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._update_surface_panel()
         self._schedule_render()
 
+    def _open_colour_picker(self, start, title, on_change):
+        """A colour wheel that updates the preview live as you pick.
+
+        on_change(QColor) runs on every change; Cancel calls it with start
+        again.  The dialog is Qt's own (not the OS one) and stays on top of
+        the browser: inside Nuke the static QColorDialog.getColor can open
+        behind the window, so clicking the swatch seemed to do nothing.
+        """
+        old = getattr(self, '_colour_dialog', None)
+        if old is not None:
+            old.reject()
+        dlg = QtWidgets.QColorDialog(start, self)
+        dlg.setWindowTitle(title)
+        dlg.setOption(QtWidgets.QColorDialog.DontUseNativeDialog, True)
+        dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        dlg.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        dlg.currentColorChanged.connect(on_change)
+        dlg.colorSelected.connect(on_change)
+        dlg.rejected.connect(lambda: on_change(start))
+
+        def closed(*_args):
+            if getattr(self, '_colour_dialog', None) is dlg:
+                self._colour_dialog = None
+        dlg.finished.connect(closed)
+        self._colour_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
     def _choose_surface_colour(self):
         i = self._sel_surface
         if not 0 <= i < self._num_surfaces():
             return
         c = self._surf[i]['color']
         start = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
-        chosen = QtWidgets.QColorDialog.getColor(start, self, 'Surface %d Tint' % i)
-        if chosen.isValid():
-            self._edit_surface('color', (chosen.redF(), chosen.greenF(), chosen.blueF()))
+
+        def apply(colour, i=i):
+            # Tint the surface the picker was opened for, even if another
+            # surface gets selected meanwhile.
+            if not (colour.isValid() and 0 <= i < len(self._surf)):
+                return
+            self._surf[i]['color'] = (colour.redF(), colour.greenF(), colour.blueF())
+            self._surf_dirty.add(i)
+            self.diagram.update()
+            if i == self._sel_surface:
+                self._update_surface_panel()
+            self._schedule_render()
+        self._open_colour_picker(start, 'Surface %d Tint' % i, apply)
 
     def _reset_surface(self):
         i = self._sel_surface
@@ -2688,12 +2729,13 @@ class LensBrowserWindow(QtWidgets.QWidget):
     # -- preview --------------------------------------------------------
 
     def _choose_colour(self):
-        c = QtWidgets.QColorDialog.getColor(self._source_colour, self, 'Light Colour')
-        if c.isValid():
-            self._source_colour = c
-            self._update_colour_button()
-            self._schedule_render()
-            self._save_preview()
+        def apply(colour):
+            if colour.isValid():
+                self._source_colour = QtGui.QColor(colour)
+                self._update_colour_button()
+                self._schedule_render()
+                self._preview_save_timer.start()
+        self._open_colour_picker(QtGui.QColor(self._source_colour), 'Light Colour', apply)
 
     def _update_colour_button(self):
         self.colour_btn.setStyleSheet('background-color: %s; min-height: 18px;'
@@ -2864,6 +2906,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         global _window
+        if getattr(self, '_colour_dialog', None) is not None:
+            self._colour_dialog.accept()
         self._save_layout()
         self._save_preview()
         if self._renderer is not None:
