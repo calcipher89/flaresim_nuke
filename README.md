@@ -58,7 +58,7 @@ Matches AFXToneMap convention — same Clip and Knee values produce almost the s
 
 ### Per-Surface Art Direction
 
-Each lens surface now has individual controls in the Surfaces tab: **gain**, **color** (RGB tint), **offset** (pixel shift x/y), and **scale** (pull toward / push away from centre). Both surfaces in a ghost pair combine together.
+Each lens surface now has individual controls in the Surfaces tab: **gain**, **color** (RGB tint), **offset** (pixel shift x/y), and **scale** (pull toward / push away from centre). Both surfaces in a ghost pair combine together. The Lens Browser's **Lens Elements** tab edits the same controls with a lens diagram, a live preview and ghost picking.
 
 ### Profiler
 
@@ -189,10 +189,15 @@ The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → Fl
 
 - **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
 - **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it.
-- **Flare Look**: Gain, aperture Blades and Rotation, Ghost Blur. These are the node's knobs.
-- **Preview Light and Camera**: light intensity and colour, FOV and preview quality. These only shape the preview; the node keeps its own source and camera settings.
+- **Look** tab:
+  - **Flare Look**: Gain, aperture Blades and Rotation, Ghost Blur. These are the node's knobs.
+  - **Preview Light and Camera**: light intensity and colour, FOV and preview quality. These only shape the preview; the node keeps its own source and camera settings.
+- **Lens Elements** tab, for shaping individual ghosts:
+  - A side view of the lens: every surface's curve, the glass between them and the iris. Click a surface (or step with the arrows) to select it; its ghosts are highlighted in the preview.
+  - **Surface** controls for the selected surface: **Makes ghosts** (off drops every ghost off it), **Gain**, **Tint**, **Offset X/Y** (in the node's pixels) and **Scale**. These are the node's Surfaces tab knobs, so the preview shows what the node will render. A ghost bounces off two surfaces, so both surfaces' settings combine (gains and tints multiply, offsets add, scales multiply). Changed surfaces are drawn in cyan, turned-off ones dashed red.
+  - **Pick a Ghost**: Shift+click (or right-click) a ghost in the preview. The list shows which surfaces make the light there, brightest first; pick one to highlight that ghost and its two surfaces, then **Edit** either surface. **Highlight in the preview** dims the other ghosts (preview only).
 - **Start From a Look**: load a saved look's lens and settings as a starting point.
-- **Apply to Node** sets the lens and look on the node the window was opened from (or the selected FlareSim node, or a new one). Ctrl+Z undoes it. **Save as Look...** keeps the settings as a look.
+- **Apply to Node** sets the lens and look on the node the window was opened from (or the selected FlareSim node, or a new one). Ctrl+Z undoes it. With the same lens, only the surfaces you changed in the window are written, so tweaks made on the node's Surfaces tab are kept; a new lens or a look sets every surface. **Reload From Node** reads the node's lens, look and surface settings. **Save as Look...** keeps the settings, including changed surfaces, as a look.
 
 The preview runs on the CPU from the `flaresim_preview` library installed next to the plugins, so it works without a GPU and doesn't compete with the node. Without that library the window still works, minus the preview.
 
