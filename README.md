@@ -32,6 +32,16 @@ When the light source moves outside the frame, the flare no longer vanishes. A u
 - **Outside Intensity** — brightness of the off-screen source
 - **Edge Falloff (px)** — blend zone at the frame edge for smooth transitions
 
+### Occlusion Matte
+
+A light that goes behind a foreground object stops flaring. Connect a roto, or the object's alpha, to the **matte** input (input 1 on FlareSim, input 3 on FlareSim3D). The node measures how much of a small disc around the light the matte covers and dims the flare by that much, so a light sliding behind an edge fades out instead of popping off.
+
+- **Matte Mode** — **Occlude** (default): white in the matte hides the light. **Mask**: white lets the light through, so only lights inside the white area flare (what the input was meant for in the original FlareSim).
+- **Light Size** — diameter in pixels of the light as the matte sees it. Bigger gives a slower fade across an edge. Default 8.
+- Manual XY and FlareSim3D measure at the light's position (FlareSim3D uses where the Axis projects through the Camera). Auto Detect dims each detected light at its own spot, before **Max Sources**, so hidden lights don't use up places.
+- Lights outside the frame (Outside Source) are not affected.
+- The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
+
 ### Spectral Jitter
 
 Randomises each ray's wavelength within its spectral bin, smoothing the hard colour boundaries between discrete samples at zero extra ray-trace cost — same number of traces, each one uses a slightly different wavelength.
@@ -164,7 +174,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 **FlareSim** (2D source):
 1. Connect your plate to the input.
-2. Click **Lens Browser** on the node to pick a lens with a live preview, or point **Lens File** at a `.lens` prescription.
+2. Click **Lens Browser** on the node to pick a lens with a live preview. The button shows the node's current lens.
 3. Set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
@@ -178,10 +188,11 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 **FlareSim3D** (3D source):
 1. Connect your plate to input 0, Camera to input 1, Axis (at the light position) to input 2.
-2. Point **Lens File** at a `.lens` prescription.
+2. Click **Lens Browser** to pick a lens.
 3. The flare tracks the Axis through the Camera automatically.
 4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
 5. Enable **Outside Source** so the flare persists when the source leaves the frame.
+6. If the light passes behind something, connect a matte of it to the **matte** input (see Occlusion Matte).
 
 ### Lens Browser
 
@@ -199,6 +210,8 @@ The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → Fl
   - **Pick a Ghost**: Shift+click (or right-click) a ghost in the preview. The list shows which surfaces make the light there, brightest first; pick one to highlight that ghost and its two surfaces, then **Edit** either surface. **Highlight in the preview** dims the other ghosts (preview only).
 - **Start From a Look**: load a saved look's lens and settings as a starting point, or **Delete Look** to remove one of your own looks.
 - **Apply to Node** sets the lens and look on the node the window was opened from (or the selected FlareSim node, or a new one). Ctrl+Z undoes it. With the same lens, only the surfaces you changed in the window are written, so tweaks made on the node's Surfaces tab are kept; a new lens or a look sets every surface. **Reload From Node** reads the node's lens, look and surface settings. **Save as Look...** keeps the settings, including changed surfaces, as a look.
+- **Import Lens**: copy `.lens` files, or a whole folder of them, into your own lens library (`~/.nuke/FlareSim/lenses`). A folder keeps its name and sub-folders. Imported lenses get thumbnails like the rest; the **Library** filter shows Bundled, Mine (imported) or Studio lenses. A file already in your library is skipped, and a different file with the same name is saved with a number. Lenses in your home folder only exist on your machine: for a team or a render farm, put them in a shared folder listed in `FLARESIM_LENS_PATH` (shown as Studio). **Open .lens File...** previews a file from anywhere without importing it.
+- **Lens File knob**: the node's Lens File path is hidden from the panel, since the Lens Browser sets it. It is still saved in the script and can be set from Python, e.g. `node['lens_file'].setValue(path)`.
 
 The preview runs on the CPU from the `flaresim_preview` library installed next to the plugins, so it works without a GPU and doesn't compete with the node. Without that library the window still works, minus the preview.
 

@@ -9,7 +9,7 @@
 //   0 — plate   (Iop)       : image to sample source colour from
 //   1 — cam     (CameraOp)  : scene camera (provides FOV + world transform)
 //   2 — light   (AxisOp)    : light source position in world space
-//   3 — mask    (Iop)       : optional mask gating which pixels drive flare
+//   3 — matte   (Iop)       : optional occlusion matte (alpha)
 //
 // The source's Z distance from the camera enables:
 //   • Distance-based inverse-square intensity falloff (optional)
@@ -31,6 +31,7 @@
 #include "DDImage/Vector4.h"
 
 #include "lens.h"
+#include "occlusion.h"
 #include "ghost.h"
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
@@ -189,6 +190,8 @@ public:
     float       outside_source_color_[3];
     float       outside_source_intensity_;
     float       outside_source_falloff_;
+    int         matte_mode_;               // flaresim::MatteMode
+    float       light_size_;               // matte disc diameter, pixels
 
     // Per-surface art direction
     bool        surf_enabled_[MAX_SURFS_UI];
@@ -198,6 +201,25 @@ public:
     float       surf_offy_[MAX_SURFS_UI];
     float       surf_scale_[MAX_SURFS_UI];
     char        surf_labels_[MAX_SURFS_UI][64];
+
+    // The Lens Browser button names the current lens, since the Lens File
+    // knob itself is hidden.  Nuke keeps the label pointer, so it lives here.
+    char lens_button_label_[192] = "Lens Browser";
+
+    void update_lens_button_label()
+    {
+        std::string name(lens_file_ ? lens_file_ : "");
+        const size_t slash = name.find_last_of("/\\");
+        if (slash != std::string::npos) name = name.substr(slash + 1);
+        const size_t dot = name.rfind('.');
+        if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
+        if (name.empty())
+            snprintf(lens_button_label_, sizeof(lens_button_label_), "Lens Browser");
+        else
+            snprintf(lens_button_label_, sizeof(lens_button_label_),
+                     "Lens Browser  (%s)", name.c_str());
+        if (Knob* kb = knob("lens_browser")) kb->label(lens_button_label_);
+    }
 
     // ---- Runtime state ----
     LensSystem  lens_;
@@ -273,6 +295,8 @@ public:
         , outside_source_enable_(true)
         , outside_source_intensity_(8.0f)
         , outside_source_falloff_(0.0f)
+        , matte_mode_(flaresim::kMatteOcclude)
+        , light_size_(8.0f)
     {
         outside_source_color_[0] = 1.0f;
         outside_source_color_[1] = 1.0f;
@@ -302,7 +326,7 @@ public:
                "  plate — image to sample source colour from\n"
                "  cam   — scene camera (provides FOV and projection)\n"
                "  light — Axis at the light source position in world space\n"
-               "  mask  — optional alpha mask gating which regions drive flare\n\n"
+               "  matte — optional alpha: white hides the light (see Matte Mode)\n\n"
                "When the source is behind the camera: no flare is produced.\n"
                "When the source is off-screen: Outside Source knobs take over.\n\n"
                "Merge the flare over the beauty with a Merge (plus) node.";
@@ -311,7 +335,7 @@ public:
     static const Iop::Description d;
 
     // ---- Input handling ----
-    // 0: plate (Iop), 1: cam (CameraOp), 2: light (AxisOp), 3: mask (Iop)
+    // 0: plate (Iop), 1: cam (CameraOp), 2: light (AxisOp), 3: matte (Iop)
 
     int maximum_inputs() const override { return 4; }
     int minimum_inputs() const override { return 3; }
@@ -338,7 +362,7 @@ public:
         switch (idx) {
             case 1: return "cam";
             case 2: return "light";
-            case 3: return "mask";
+            case 3: return "matte";
             default: return "";
         }
     }
@@ -422,13 +446,17 @@ public:
     void knobs(Knob_Callback f) override
     {
         File_knob(f, &lens_file_, "lens_file", "Lens File");
-        Tooltip(f, "Path to a .lens prescription file.");
+        // Hidden: the Lens Browser sets it.  Still saved in the script and
+        // settable from Python or the knob's expression.
+        SetFlags(f, Knob::HIDDEN);
+        Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
         PyScript_knob(f, "import FlareSim_LensBrowser\n"
                          "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
-                      "lens_browser", "Lens Browser");
+                      "lens_browser", lens_button_label_);
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
-                   "then apply it to this node or save it as a look.");
+                   "then apply it to this node or save it as a look.  The button "
+                   "shows the node's current lens.");
 
         Divider(f, "Ghost");
         Int_knob(f, &ray_grid_, "ray_grid", "Ray Grid (NxN)");
@@ -467,6 +495,24 @@ public:
                    "Source Intensity.  The intensity scales as (ref / distance)^2.\n\n"
                    "Example: if your scene is in centimetres and the source is a "
                    "street lamp 500 cm away, set this to 500.");
+
+        Divider(f, "Matte");
+        Enumeration_knob(f, &matte_mode_, flaresim::kMatteModes, "matte_mode", "Matte Mode");
+        Tooltip(f, "What the matte input does.  Connect a roto or an object's "
+                   "alpha to the matte input.\n"
+                   "Occlude (default): white in the matte hides the light, for "
+                   "lights that go behind foreground objects.  A light half "
+                   "covered by the matte flares at half strength, so it fades "
+                   "out smoothly as it slides behind an edge.\n"
+                   "Mask: white lets the light through; only lights inside the "
+                   "white area flare.\n"
+                   "Lights outside the frame (Outside Source) are not affected.\n\nThe light is measured where the Axis projects through the Camera.");
+        Float_knob(f, &light_size_, "light_size", "Light Size");
+        SetRange(f, 1.0, 100.0);
+        Tooltip(f, "Diameter in pixels of the light as the matte sees it.  The "
+                   "flare is dimmed by how much of this disc the matte covers.  "
+                   "Bigger = a slower fade as the light passes an edge.  "
+                   "Default 8.");
 
         Divider(f, "Outside Source");
         Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
@@ -562,6 +608,8 @@ public:
     // ---- knob_changed ----
     int knob_changed(Knob* k) override
     {
+        if (k->is("showPanel"))
+            update_lens_button_label();   // and fall through
         if (k->is("surf_refresh")) { rebuild_surf_ui(); return 1; }
         if (k->is("surf_select_all") || k->is("surf_deselect_all")) {
             const bool val = k->is("surf_select_all");
@@ -589,6 +637,7 @@ public:
             return 1;
         }
         if (k->is("lens_file")) {
+            update_lens_button_label();
             const std::string path(lens_file_ ? lens_file_ : "");
             if (!path.empty() && path != last_lens_file_) {
                 if (lens_.load(path.c_str())) {
@@ -626,7 +675,7 @@ public:
         if (Op* op = Op::input(1)) op->validate(for_real);
         if (Op* op = Op::input(2)) op->validate(for_real);
 
-        // Validate mask if connected
+        // Validate matte if connected
         if (Op* op = Op::input(3)) op->validate(for_real);
 
         const int x0 = info_.x(), y0 = info_.y();
@@ -902,6 +951,19 @@ public:
                 final_r *= scale;
                 final_g *= scale;
                 final_b *= scale;
+            }
+
+            // Occlusion matte: dim the light by how much the matte covers
+            // it where the Axis projects.
+            Iop* matte = dynamic_cast<Iop*>(Op::input(3));
+            if (emit_source && matte) {
+                const float vis = flaresim::matte_visibility(
+                    matte, matte_mode_, (float)mx, (float)my, light_size_ * 0.5f,
+                    x0, y0, x1, y1, pending_fmt_x0_, pending_fmt_y0_,
+                    pending_fmt_w_, pending_fmt_h_);
+                if (Op::aborted()) { zero_buffers(); return; }
+                final_r *= vis;  final_g *= vis;  final_b *= vis;
+                emit_source = (vis > 1e-4f);
             }
 
             if (emit_source) {

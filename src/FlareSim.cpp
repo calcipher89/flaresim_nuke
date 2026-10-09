@@ -20,6 +20,7 @@
 #include "DDImage/ChannelSet.h"
 
 #include "lens.h"
+#include "occlusion.h"
 #include "ghost.h"
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
@@ -303,6 +304,8 @@ public:
     float       outside_source_color_[3];
     float       outside_source_intensity_;
     float       outside_source_falloff_;   // blend zone in pixels at frame edge
+    int         matte_mode_;               // flaresim::MatteMode
+    float       light_size_;               // matte disc diameter, pixels
 
     // Per-surface toggles, gain, color, and offset (MAX_SURFS_UI pre-allocated)
     bool        surf_enabled_[MAX_SURFS_UI];
@@ -313,6 +316,25 @@ public:
     float       surf_scale_[MAX_SURFS_UI];     // scale per surface (1.0 = default)
     // Per-instance labels for surface knobs (stable pointers for Knob API)
     char        surf_labels_[MAX_SURFS_UI][64];
+
+    // The Lens Browser button names the current lens, since the Lens File
+    // knob itself is hidden.  Nuke keeps the label pointer, so it lives here.
+    char lens_button_label_[192] = "Lens Browser";
+
+    void update_lens_button_label()
+    {
+        std::string name(lens_file_ ? lens_file_ : "");
+        const size_t slash = name.find_last_of("/\\");
+        if (slash != std::string::npos) name = name.substr(slash + 1);
+        const size_t dot = name.rfind('.');
+        if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
+        if (name.empty())
+            snprintf(lens_button_label_, sizeof(lens_button_label_), "Lens Browser");
+        else
+            snprintf(lens_button_label_, sizeof(lens_button_label_),
+                     "Lens Browser  (%s)", name.c_str());
+        if (Knob* kb = knob("lens_browser")) kb->label(lens_button_label_);
+    }
 
     // ---- Runtime state ----
     LensSystem  lens_;
@@ -416,6 +438,8 @@ public:
         , outside_source_enable_(true)
         , outside_source_intensity_(8.0f)
         , outside_source_falloff_(0.0f)
+        , matte_mode_(flaresim::kMatteOcclude)
+        , light_size_(8.0f)
     {
         manual_xy_[0] = 960.0;  // sensible default (centre of 1920 frame)
         manual_xy_[1] = 540.0;
@@ -450,8 +474,9 @@ public:
                "for every bright pixel in the input image.\n\n"
                "Output: ghost reflections in RGBA.\n"
                "Alpha is derived from flare luminance for compositing.\n\n"
-               "Connect a second input to use it as a mask (alpha channel) "
-               "that gates which bright regions drive the flare.\n\n"
+               "Connect a matte (alpha) to the second input to hide lights "
+               "behind foreground objects, or set Matte Mode to Mask to "
+               "limit which lights flare.\n\n"
                "Merge the flare over the beauty with a Merge (plus) node.";
     }
 
@@ -461,7 +486,7 @@ public:
     int  minimum_inputs() const override { return 1; }
     const char* input_label(int idx, char*) const override
     {
-        if (idx == 1) return "mask";
+        if (idx == 1) return "matte";
         return "";
     }
 
@@ -560,14 +585,18 @@ public:
     // ---- Knobs ----
     void knobs(Knob_Callback f) override
     {
-        File_knob(f, &lens_file_,  "lens_file",      "Lens File");
-        Tooltip(f, "Path to a .lens prescription file.");
+        File_knob(f, &lens_file_, "lens_file", "Lens File");
+        // Hidden: the Lens Browser sets it.  Still saved in the script and
+        // settable from Python or the knob's expression.
+        SetFlags(f, Knob::HIDDEN);
+        Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
         PyScript_knob(f, "import FlareSim_LensBrowser\n"
                          "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
-                      "lens_browser", "Lens Browser");
+                      "lens_browser", lens_button_label_);
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
-                   "then apply it to this node or save it as a look.");
+                   "then apply it to this node or save it as a look.  The button "
+                   "shows the node's current lens.");
 
         Divider(f, "Source");
         static const char* const kSourceModes[] = {
@@ -647,6 +676,24 @@ public:
                    "Start near the size of your brightest light in pixels "
                    "(for example 20 to 50 for a headlight).\n"
                    "0 = off (default).");
+
+        Divider(f, "Matte");
+        Enumeration_knob(f, &matte_mode_, flaresim::kMatteModes, "matte_mode", "Matte Mode");
+        Tooltip(f, "What the matte input does.  Connect a roto or an object's "
+                   "alpha to the matte input.\n"
+                   "Occlude (default): white in the matte hides the light, for "
+                   "lights that go behind foreground objects.  A light half "
+                   "covered by the matte flares at half strength, so it fades "
+                   "out smoothly as it slides behind an edge.\n"
+                   "Mask: white lets the light through; only lights inside the "
+                   "white area flare.\n"
+                   "Lights outside the frame (Outside Source) are not affected.\n\nAuto Detect: each detected light is dimmed by the matte at its own spot.");
+        Float_knob(f, &light_size_, "light_size", "Light Size");
+        SetRange(f, 1.0, 100.0);
+        Tooltip(f, "Diameter in pixels of the light as the matte sees it.  The "
+                   "flare is dimmed by how much of this disc the matte covers.  "
+                   "Bigger = a slower fade as the light passes an edge.  "
+                   "Default 8.");
 
         Divider(f, "Outside Source");
         Bool_knob(f, &outside_source_enable_, "outside_source_enable", "Enable Outside Source");
@@ -866,6 +913,7 @@ public:
         };
         if (k->is("showPanel")) {
             sync_source_mode_enabled();
+            update_lens_button_label();
             // fall through — other handlers don't care about showPanel
         }
         if (k->is("source_mode")) {
@@ -934,6 +982,7 @@ public:
             return 1;
         }
         if (k->is("lens_file")) {
+            update_lens_button_label();
             // Reload lens interactively and rebuild pair UI immediately.
             const std::string path(lens_file_ ? lens_file_ : "");
             if (!path.empty() && path != last_lens_file_) {
@@ -1201,6 +1250,17 @@ public:
             }
             // else: source off-screen and outside_source disabled → no flare
 
+            // Occlusion matte: dim the light by how much the matte covers it.
+            if (emit_source && input(1)) {
+                const float vis = flaresim::matte_visibility(
+                    input(1), matte_mode_, (float)mx, (float)my, light_size_ * 0.5f,
+                    x0, y0, x1, y1, pending_fmt_x0_, pending_fmt_y0_,
+                    pending_fmt_w_, pending_fmt_h_);
+                if (Op::aborted()) { zero_buffers(); return; }
+                final_r *= vis;  final_g *= vis;  final_b *= vis;
+                emit_source = (vis > 1e-4f);
+            }
+
             if (emit_source) {
                 const float ndc_x = ((float)mx - fmt_cx) / pending_fmt_w_;
                 const float ndc_y = ((float)my - fmt_cy) / pending_fmt_h_;
@@ -1304,6 +1364,28 @@ public:
             // cap counts lights rather than blocks.
             if (cluster_radius_ > 0)
                 cluster_sources(sources, cluster_radius_, pending_fmt_w_, tan_half_h);
+
+            // Occlusion matte: dim each light by the matte at its own spot,
+            // before the cap so hidden lights don't take up places.
+            if (input(1)) {
+                std::vector<BrightPixel> kept;
+                kept.reserve(sources.size());
+                for (BrightPixel bp : sources) {
+                    const float px = std::tan(bp.angle_x) / (2.0f * tan_half_h)
+                                     * pending_fmt_w_ + fmt_cx;
+                    const float py = std::tan(bp.angle_y) / (2.0f * tan_half_v)
+                                     * pending_fmt_h_ + fmt_cy;
+                    const float vis = flaresim::matte_visibility(
+                        input(1), matte_mode_, px, py, light_size_ * 0.5f,
+                        x0, y0, x1, y1, pending_fmt_x0_, pending_fmt_y0_,
+                        pending_fmt_w_, pending_fmt_h_);
+                    if (vis <= 1e-4f) continue;
+                    bp.r *= vis;  bp.g *= vis;  bp.b *= vis;
+                    kept.push_back(bp);
+                }
+                sources.swap(kept);
+                if (Op::aborted()) { zero_buffers(); return; }
+            }
 
             // Cap total sources — keep the brightest.
             const int cap = std::max(max_sources_, 1);
@@ -1597,7 +1679,7 @@ public:
         input0().request(info_.x(), info_.y(), info_.r(), info_.t(),
                          Mask_RGB, count);
 
-        // If a mask is connected, request its alpha over the full frame too.
+        // If a matte is connected, request its alpha over the full frame too.
         if (input(1))
             input(1)->request(info_.x(), info_.y(), info_.r(), info_.t(),
                               Mask_Alpha, count);
