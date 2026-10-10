@@ -1040,6 +1040,37 @@ def _breakable(name):
 _SURF_KNOB_RE = re.compile(r'^surf_(?:gain_|color_|offx_|offy_|scale_)?\d+$')
 
 
+# Near camera: lenses within this fraction of the camera's focal length,
+# or the closest few when none are that close.
+NEAR_FOCAL = 0.15
+NEAR_FALLBACK = 6
+
+
+def node_camera_focal(node):
+    """Focal length in mm from the node's camera (cam input) or, failing
+    that, its Use Sensor Size knobs.  0 when neither gives one."""
+    try:
+        cam = node.input(1 if node.Class() == 'FlareSim3D' else 2)
+        if cam is not None and 'focal' in cam.knobs():
+            return float(cam['focal'].value())
+        knobs = node.knobs()
+        if 'fov_use_sensor' in knobs and knobs['fov_use_sensor'].value() \
+                and 'focal_length' in knobs:
+            return float(knobs['focal_length'].value())
+    except Exception:
+        pass
+    return 0.0
+
+
+def lenses_near_focal(lenses, focal):
+    """Paths of the lenses close to `focal` mm."""
+    known = [l for l in lenses if l.focal > 0]
+    near = [l for l in known if abs(l.focal - focal) <= NEAR_FOCAL * focal]
+    if not near:
+        near = sorted(known, key=lambda l: abs(math.log(l.focal / focal)))[:NEAR_FALLBACK]
+    return set(l.path for l in near)
+
+
 def _format_width(node):
     """Width of the node's format in pixels, for surface offsets."""
     for get in (lambda: node.format().width(), lambda: node.width(),
@@ -1484,6 +1515,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._filtered = []
         self._lens_path = ''
         self._look_extra = {}          # look knobs carried through as-is
+        self._camera_focal = 0.0       # focal length of the node's camera, mm
         self._look_name = ''
         self._created_node = None
         self._source_colour = QtGui.QColor(255, 255, 255)
@@ -2234,7 +2266,10 @@ class LensBrowserWindow(QtWidgets.QWidget):
         terms = self.search.text().strip().lower().split()
         maker = self.maker_combo.currentData()
         library = self.library_combo.currentData()
-        _f, flo, fhi = FOCAL_RANGES[self.focal_combo.currentIndex()]
+        fi = self.focal_combo.currentIndex()
+        near = (lenses_near_focal(self._lenses, self._camera_focal)
+                if fi >= len(FOCAL_RANGES) and self._camera_focal > 0 else None)
+        _f, flo, fhi = FOCAL_RANGES[fi if near is None else 0]
         _s, slo, shi = SPEEDS[self.speed_combo.currentIndex()]
         kind = self.type_combo.currentText()
         out = []
@@ -2244,7 +2279,9 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 ok = False
             elif maker and l.maker != maker:
                 ok = False
-            elif self.focal_combo.currentIndex() and not (flo <= l.focal < fhi):
+            elif near is not None and l.path not in near:
+                ok = False
+            elif near is None and fi and not (flo <= l.focal < fhi):
                 ok = False
             elif self.speed_combo.currentIndex() and not (l.fnum > 0 and slo <= l.fnum < shi):
                 ok = False
@@ -2693,6 +2730,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                     values[k] = FlareSim_Looks._knob_value(knobs[k])
         surfaces = self._set_look_values(values)
         self._ref_width = _format_width(node)
+        self._set_camera_focal(node_camera_focal(node), knobs)
         for k, row in (('fov_h', self.fov), ('source_intensity', self.intensity)):
             if k in knobs:
                 row.setValue(float(knobs[k].value()))
@@ -2709,6 +2747,36 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._knob_dirty.clear()
         self._look_dirty = False
         self._schedule_render()
+
+    def _set_camera_focal(self, focal, knobs=None):
+        """Offer "Near camera" under Focal for the node's camera focal
+        length, and pick it unless that would move off the node's lens."""
+        changed = abs(focal - self._camera_focal) > 1e-3
+        self._camera_focal = focal
+        combo = self.focal_combo
+        combo.blockSignals(True)
+        was_near = combo.currentIndex() >= len(FOCAL_RANGES)
+        while combo.count() > len(FOCAL_RANGES):
+            combo.removeItem(len(FOCAL_RANGES))
+        if focal > 0:
+            combo.addItem('Near camera (%g mm)' % round(focal, 1))
+            combo.setItemData(len(FOCAL_RANGES),
+                              'Lenses close to the focal length of the node\'s camera.',
+                              QtCore.Qt.ToolTipRole)
+        if focal <= 0:
+            if was_near or combo.currentIndex() < 0:
+                combo.setCurrentIndex(0)
+        elif was_near and not changed:
+            combo.setCurrentIndex(len(FOCAL_RANGES))
+        elif changed:
+            lens = knobs['lens_file'].value() if knobs and 'lens_file' in knobs else ''
+            near = set(os.path.normcase(p) for p in lenses_near_focal(self._lenses, focal))
+            if not lens or os.path.normcase(lens.replace('\\', '/')) in near:
+                combo.setCurrentIndex(len(FOCAL_RANGES))
+            elif was_near:
+                combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+        self._apply_filters()
 
     def _apply_to_node(self):
         if not self._lens_path:

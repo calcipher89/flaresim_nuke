@@ -18,6 +18,7 @@
 #include "DDImage/Knobs.h"
 #include "DDImage/Channel.h"
 #include "DDImage/ChannelSet.h"
+#include "DDImage/CameraOp.h"
 
 #include "lens.h"
 #include "occlusion.h"
@@ -492,6 +493,9 @@ public:
                "for every bright pixel in the input image.\n\n"
                "Output: ghost reflections in RGBA.\n"
                "Alpha is derived from flare luminance for compositing.\n\n"
+               "Connect a Camera to the cam input to take the field of view "
+               "from it (focal length and horizontal aperture) instead of "
+               "the FOV knobs.\n\n"
                "Connect a matte (alpha) to the second input to hide lights "
                "behind foreground objects, or set Matte Mode to Mask to "
                "limit which lights flare.\n\n"
@@ -500,12 +504,30 @@ public:
 
     static const Iop::Description d;
 
-    int  maximum_inputs() const override { return 2; }
+    // 0: plate (Iop), 1: matte (Iop), 2: cam (CameraOp, optional)
+    int  maximum_inputs() const override { return 3; }
     int  minimum_inputs() const override { return 1; }
+    bool test_input(int idx, Op* op) const override
+    {
+        if (idx == 2) return dynamic_cast<CameraOp*>(op) != nullptr;
+        return Iop::test_input(idx, op);
+    }
+    Op* default_input(int idx) const override
+    {
+        if (idx == 2) return nullptr;   // no camera: use the FOV knobs
+        return Iop::default_input(idx);
+    }
     const char* input_label(int idx, char*) const override
     {
         if (idx == 1) return "matte";
+        if (idx == 2) return "cam";
         return "";
+    }
+
+    // The camera on the cam input, if any.
+    CameraOp* camera_input() const
+    {
+        return dynamic_cast<CameraOp*>(Op::input(2));
     }
 
     // ---- rebuild_surf_ui ----
@@ -792,7 +814,8 @@ public:
         adv_.add(f, Float_knob(f, &fov_h_deg_,  "fov_h",         "FOV H (deg)"));
         SetRange(f, 1.0, 180.0);
         if (fov_use_sensor_) SetFlags(f, Knob::DISABLED);
-        Tooltip(f, "Horizontal field of view of the input image in degrees.");
+        Tooltip(f, "Horizontal field of view of the input image in degrees.  "
+                   "Ignored when a Camera is connected to the cam input.");
         adv_.add(f, Bool_knob(f, &fov_auto_v_,  "fov_auto_v",    "Auto FOV V"));
         if (fov_use_sensor_) SetFlags(f, Knob::DISABLED);
         Tooltip(f, "Derive vertical FOV from horizontal FOV and image aspect ratio.");
@@ -1112,6 +1135,7 @@ public:
 
         input0().validate(for_real);
         if (input(1)) input(1)->validate(for_real);
+        if (CameraOp* cam = camera_input()) cam->validate(for_real);
 
         const int x0 = info_.x();
         const int y0 = info_.y();
@@ -1218,7 +1242,17 @@ public:
         const int src_x1 = pending_src_x1_, src_y1 = pending_src_y1_;
 
         float fov_h, fov_v;
-        if (fov_use_sensor_) {
+        CameraOp* cam = camera_input();
+        const bool cam_fov = cam && cam->focal_length() > 0.1f && cam->film_width() > 0.1f;
+        if (cam_fov) {
+            // The camera's focal length and horizontal aperture; vertical
+            // follows the format's aspect, as Nuke's own renders do.
+            fov_h = 2.0f * std::atan(cam->film_width() / (2.0f * cam->focal_length()));
+            const float aspect = (pending_fmt_h_ > 0)
+                ? ((float)pending_fmt_w_ / (float)pending_fmt_h_)
+                : (16.0f / 9.0f);
+            fov_v = 2.0f * std::atan(std::tan(fov_h * 0.5f) / aspect);
+        } else if (fov_use_sensor_) {
             const float fl = std::max(focal_length_mm_, 0.1f);
             fov_h = 2.0f * std::atan(sensor_w_mm_ / (2.0f * fl));
             fov_v = 2.0f * std::atan(sensor_h_mm_ / (2.0f * fl));
