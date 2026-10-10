@@ -1,4 +1,4 @@
-# FlareSim for Nuke
+# FlareSim+ for Nuke
 
 A physically-based lens flare simulator for Foundry Nuke — GPU-optimised fork of [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke).
 
@@ -11,6 +11,12 @@ The original FlareSim is a Windows/Nuke 16 plugin built on CUDA 13. This fork ad
 ---
 
 ## What's New
+
+### FlareSim+ Panel Header
+
+The FlareSim tab opens with a FlareSim+ header: the wordmark with its spectral line, and a card for the node's lens showing a small render of its look, the lens name, the look name, and the focal length (the connected camera's, or the lens's own with its f-stop). It updates when the panel opens and when the lens, the look or the inputs change. The look thumbnail is the Lens Browser's preview, saved when you click **Apply to Node**; headers are cached in `~/.nuke/FlareSim/headers`.
+
+The new name is only what you see in the panel, the **Nodes** menu and the Lens Browser. The node classes are still `FlareSim` and `FlareSim3D`, so existing scripts and looks open as before.
 
 ### Simpler Node Panel
 
@@ -183,12 +189,12 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ## Installation
 
-1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `looks/` and `lenses/`.
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `FlareSim_Header.py`, `icons/`, `looks/` and `lenses/`.
 2. Add this to `~/.nuke/init.py`:
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
    ```
-3. Restart Nuke. The nodes appear under **Filter**. The **Lens Browser** button on each node, and **Window → FlareSim Lens Browser**, open the Lens Browser window on the bundled lens library.
+3. Restart Nuke. The nodes appear under **Filter** as **FlareSim+** and **FlareSim+ 3D**. The **Lens Browser** button on each node, and **Window → FlareSim+ Lens Browser**, open the Lens Browser window on the bundled lens library.
 
 ---
 
@@ -218,7 +224,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ### Lens Browser
 
-The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim Lens Browser**) opens a window for picking a lens and building a look before you render:
+The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim+ Lens Browser**) opens a window for picking a lens and building a look before you render:
 
 - **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length (including **Near camera** when the node has a camera) and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
 - **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it. Exposure, the preview light and the quality are remembered between sessions; **Reset** next to Exposure and **Reset Preview Light** put them back to their defaults.

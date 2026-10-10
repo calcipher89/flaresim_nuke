@@ -99,7 +99,7 @@ nuke.pluginAddPath('./plugins/FlareSim')
 Restart Nuke 15. You should see:
 
 - **Filter → FlareSim** and **Filter → FlareSim3D** in the node menu
-- A **Lens Browser** button on each FlareSim node, and **Window → FlareSim Lens Browser**, both opening the Lens Browser window on the bundled lens library
+- A **Lens Browser** button on each FlareSim node, and **Window → FlareSim+ Lens Browser**, both opening the Lens Browser window on the bundled lens library
 
 ## 6. Quick test in Nuke
 
