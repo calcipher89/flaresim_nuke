@@ -42,6 +42,14 @@ SIZE = (380, 128)
 THUMB_RECT = (16, 62, 108, 56)
 TRIGGER_KNOBS = ('showPanel', 'lens_file', 'look_name', 'inputChange')
 
+# Divider titles on the FlareSim tab that get a spectral tick, as in the
+# header's line.
+SECTION_TITLES = ('Source', 'Source Extraction', 'Matte', 'Ghost', 'Distance',
+                  'Camera', 'Aperture', 'Spectral', 'Highlight', 'Post-process',
+                  'Output')
+TICK_SIZE = (18, 3)
+SPECTRUM = ('#ff5a5a', '#ffb340', '#f5ec5b', '#48d17a', '#3ec6ff', '#7b6cff')
+
 
 def _qt_ready():
     return QtWidgets.QApplication.instance() is not None
@@ -271,7 +279,7 @@ def refresh(node):
         return
     try:
         path = header_image(header_info(node)).replace('\\', '/')
-        html = '<img src="%s" width="%d" height="%d">%s' % (
+        html = '<div align="center"><img src="%s" width="%d" height="%d"></div>%s' % (
             path, SIZE[0], SIZE[1], _node_tag(node))
         old = node['header'].value()
         if old != html:
@@ -302,14 +310,92 @@ def _update_open_panels(node, old, html):
         w.setText(html)
 
 
+def tick_image():
+    """Path of the spectral tick drawn before section titles."""
+    path = os.path.join(HEADER_DIR, 'tick_v%d.png' % HEADER_VERSION)
+    if not os.path.isfile(path):
+        os.makedirs(HEADER_DIR, exist_ok=True)
+        for scale, out in ((2, path[:-4] + '@2x.png'), (1, path)):
+            w, h = TICK_SIZE[0] * scale, TICK_SIZE[1] * scale
+            img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32_Premultiplied)
+            img.fill(QtCore.Qt.transparent)
+            grad = QtGui.QLinearGradient(0, 0, w, 0)
+            for i, c in enumerate(SPECTRUM):
+                grad.setColorAt(i / float(len(SPECTRUM) - 1), QtGui.QColor(c))
+            p = QtGui.QPainter(img)
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(grad)
+            p.drawRoundedRect(QtCore.QRectF(0, 0, w, h), h / 2.0, h / 2.0)
+            p.end()
+            img.save(out)
+    return path.replace('\\', '/')
+
+
+def _panel_of(label):
+    """The widget holding a node's knobs: the nearest parent of the header
+    label that also holds the section titles."""
+    w = label.parentWidget()
+    for _ in range(10):
+        if w is None:
+            return None
+        names = set(l.text().strip() for l in w.findChildren(QtWidgets.QLabel))
+        if len(names.intersection(SECTION_TITLES)) >= 2:
+            return w
+        w = w.parentWidget()
+    return None
+
+
+def style_panel(node):
+    """Centre the header and put a spectral tick before each section title
+    in the node's open panel.  Nuke builds the panel's widgets after the
+    showPanel callback, so this runs once the event loop is back."""
+    tag = _node_tag(node)
+    tick = '<img src="%s" width="%d" height="%d" style="vertical-align: middle">' \
+           '&nbsp;&nbsp;' % ((tick_image(),) + TICK_SIZE)
+    for hl in QtWidgets.QApplication.allWidgets():
+        if not isinstance(hl, QtWidgets.QLabel) or tag not in hl.text():
+            continue
+        hl.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+        hl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        panel = _panel_of(hl)
+        if panel is None:
+            continue
+        for l in panel.findChildren(QtWidgets.QLabel):
+            if l.text().strip() in SECTION_TITLES:
+                l.setTextFormat(QtCore.Qt.RichText)
+                l.setText(tick + l.text().strip())
+
+
+def _style_later(node):
+    try:
+        name = node.fullName()
+    except Exception:
+        return
+
+    def run():
+        try:
+            n = nuke.toNode(name)
+            if n is not None:
+                style_panel(n)
+        except Exception as e:
+            sys.stderr.write('FlareSim header: %s\n' % e)
+    QtCore.QTimer.singleShot(0, run)
+
+
 def _on_create():
     refresh(nuke.thisNode())
 
 
 def _on_knob_changed():
     k = nuke.thisKnob()
-    if k is not None and k.name() in TRIGGER_KNOBS:
+    if k is None:
+        return
+    if k.name() in TRIGGER_KNOBS:
         refresh(nuke.thisNode())
+    # Show Advanced reveals more section titles.
+    if k.name() in ('showPanel', 'show_advanced'):
+        _style_later(nuke.thisNode())
 
 
 def register():
