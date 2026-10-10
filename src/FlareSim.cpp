@@ -331,6 +331,8 @@ public:
     // The Lens Browser button names the current lens, since the Lens File
     // knob itself is hidden.  Nuke keeps the label pointer, so it lives here.
     char lens_button_label_[192] = "Lens Browser";
+    // Name of the look last applied from the Lens Browser, for the header.
+    std::string look_name_;
 
     void update_lens_button_label()
     {
@@ -603,6 +605,15 @@ public:
     // ---- Knobs ----
     void knobs(Knob_Callback f) override
     {
+        // Panel header: the FlareSim+ wordmark and a card showing the
+        // node's lens and look.  FlareSim_Header.py draws it when the panel
+        // opens and when the lens or look changes; it isn't saved.
+        Named_Text_knob(f, "header", "");
+        SetFlags(f, Knob::DO_NOT_WRITE | Knob::STARTLINE);
+        String_knob(f, &look_name_, "look_name", "Look");
+        SetFlags(f, Knob::HIDDEN);
+        Tooltip(f, "The look last applied from the Lens Browser.  Shown in the "
+                   "panel header.");
         File_knob(f, &lens_file_, "lens_file", "Lens File");
         // Hidden: the Lens Browser sets it.  Still saved in the script and
         // settable from Python or the knob's expression.
@@ -931,7 +942,7 @@ public:
 
         // ---- About tab ----
         Tab_knob(f, "About");
-        Text_knob(f, "FlareSim\n"
+        Text_knob(f, "FlareSim+\n"
                      "\n"
                      "Physically-based lens flare simulation for Nuke.\n"
                      "\n"

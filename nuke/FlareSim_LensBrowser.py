@@ -14,7 +14,7 @@ A standalone Qt window for picking a lens and building a flare look:
     as a new look
 
 Open it with the **Lens Browser** button on a FlareSim / FlareSim3D node, or
-from Window > FlareSim Lens Browser.
+from Window > FlareSim+ Lens Browser.
 
 The preview is rendered by the flaresim_preview library that is built and
 installed next to the plugins.  Without it the window still works, minus the
@@ -1475,7 +1475,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(LensBrowserWindow, self).__init__(parent or _nuke_main_window())
         self.setWindowFlags(QtCore.Qt.Window)
-        self.setWindowTitle('FlareSim Lens Browser')
+        self.setWindowTitle('FlareSim+ Lens Browser')
         self.setObjectName('FlareSimLensBrowser')
         self.resize(1360, 860)
 
@@ -2741,6 +2741,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
                     v = state[key]
                     look['knobs'][pattern % i] = list(v) if key == 'color' else v
         warnings = FlareSim_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
+        self._update_node_headers(nodes, look_name=self._look_name if (self._look_name or not same_lens)
+                                  else None)
         self._surf_dirty.clear()
         self._surf_all_dirty = False
         self._knob_dirty.clear()
@@ -2750,6 +2752,22 @@ class LensBrowserWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, 'FlareSim', '\n'.join(warnings))
         nuke.tprint('FlareSim: applied %s to %s' % (
             os.path.basename(self._lens_path), ', '.join(n.name() for n in nodes)))
+
+    def _update_node_headers(self, nodes, look_name=None):
+        """After Apply to Node: record the look's name (None keeps the
+        node's) and save the preview as the header's look thumbnail."""
+        try:
+            import FlareSim_Header
+        except Exception:
+            return
+        for n in nodes:
+            try:
+                if look_name is not None and 'look_name' in n.knobs():
+                    n['look_name'].setValue(look_name)
+                FlareSim_Header.save_look_thumbnail(n, self.view.image)
+                FlareSim_Header.refresh(n)
+            except Exception as e:
+                sys.stderr.write('FlareSim header: %s\n' % e)
 
     # -- preview --------------------------------------------------------
 
@@ -2979,4 +2997,4 @@ def show_for_node(node):
 
 def register():
     """Add the Lens Browser to the Window menu."""
-    nuke.menu('Nuke').addCommand('Window/FlareSim Lens Browser', show_window)
+    nuke.menu('Nuke').addCommand('Window/FlareSim+ Lens Browser', show_window)
