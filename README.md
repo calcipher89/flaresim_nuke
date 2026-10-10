@@ -28,7 +28,7 @@ The node opens with just the main controls: Lens Browser, Source, Matte, **Quali
 
 ### Camera Input (FlareSim)
 
-2D FlareSim has an optional **cam** input. Connect the shot camera and the field of view comes from its focal length and horizontal aperture (the vertical follows the format's aspect, as Nuke's own renders do), including any animation, instead of the FOV knobs. With nothing connected the FOV knobs work as before.
+2D FlareSim has an optional **cam** input. Connect the shot camera and the field of view comes from its focal length and horizontal aperture (the vertical follows the format's aspect, as Nuke's own renders do), including any animation, instead of the FOV knobs. Dot and NoOp nodes between the camera and FlareSim are fine. Under **Show Advanced → Camera**, the line next to **Use Camera** shows what the camera gives (focal length, aperture, FOV), and the FOV and sensor knobs are greyed out while it drives them. Turn **Use Camera** off to use the knobs with a camera still connected. With nothing connected the FOV knobs work as before.
 
 The Lens Browser reads the same camera (input 1 on FlareSim3D): **Focal** gets a **Near camera** entry that lists lenses within 15% of the camera's focal length, or the closest few if none are that close. It is picked for you when the node has no lens yet or its lens is already one of them; otherwise it stays one click away. Without a camera, **Use Sensor Size** with a Focal Length on the node works too.
 

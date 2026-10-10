@@ -348,8 +348,8 @@ public:
     {
         switch (idx) {
             case 0: return dynamic_cast<Iop*>(op) != nullptr;
-            case 1: return dynamic_cast<CameraOp*>(op) != nullptr;
-            case 2: return dynamic_cast<AxisOp*>(op) != nullptr;
+            case 1: return flaresim::accepts_through_passthrough<CameraOp>(op);
+            case 2: return flaresim::accepts_through_passthrough<AxisOp>(op);
             case 3: return dynamic_cast<Iop*>(op) != nullptr;
             default: return false;
         }
@@ -791,6 +791,9 @@ public:
         // Validate 3D inputs (camera, axis)
         if (Op* op = Op::input(1)) op->validate(for_real);
         if (Op* op = Op::input(2)) op->validate(for_real);
+        // Through Dots and NoOps, also validate the camera and axis behind them.
+        if (Op* op = flaresim::through_passthrough<CameraOp>(Op::input(1))) op->validate(for_real);
+        if (Op* op = flaresim::through_passthrough<AxisOp>(Op::input(2))) op->validate(for_real);
 
         // Validate matte if connected
         if (Op* op = Op::input(3)) op->validate(for_real);
@@ -896,8 +899,8 @@ public:
         CameraOp* cam = nullptr;
         AxisOp* axis  = nullptr;
 
-        if (Op* op1 = Op::input(1)) cam  = dynamic_cast<CameraOp*>(op1);
-        if (Op* op2 = Op::input(2)) axis = dynamic_cast<AxisOp*>(op2);
+        cam  = flaresim::through_passthrough<CameraOp>(Op::input(1));
+        axis = flaresim::through_passthrough<AxisOp>(Op::input(2));
 
         if (!cam || !axis) { zero_buffers(); return; }
 

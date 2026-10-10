@@ -1050,9 +1050,9 @@ def node_camera_focal(node):
     """Focal length in mm from the node's camera (cam input) or, failing
     that, its Use Sensor Size knobs.  0 when neither gives one."""
     try:
-        cam = node.input(1 if node.Class() == 'FlareSim3D' else 2)
-        if cam is not None and 'focal' in cam.knobs():
-            return float(cam['focal'].value())
+        values = FlareSim_Looks.camera_values(node)
+        if values:
+            return values[1]
         knobs = node.knobs()
         if 'fov_use_sensor' in knobs and knobs['fov_use_sensor'].value() \
                 and 'focal_length' in knobs:

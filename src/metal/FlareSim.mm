@@ -186,6 +186,8 @@ public:
     int         pending_src_x1_ = 0, pending_src_y1_ = 0;
     float       threshold_;
 
+    bool        use_camera_;           // take the FOV from the cam input
+    std::string camera_info_;          // what the camera gives (set from Python)
     bool        fov_use_sensor_;
     int         sensor_preset_;
     float       fov_h_deg_;
@@ -328,6 +330,7 @@ public:
         , overscan_h_(0)
         , show_advanced_(false)
         , threshold_(0.0f)
+        , use_camera_(true)
         , fov_use_sensor_(false)
         , sensor_preset_(0)
         , fov_h_deg_(40.0f)
@@ -397,9 +400,10 @@ public:
                "for every bright pixel in the input image.\n\n"
                "Output: ghost reflections in RGBA.\n"
                "Alpha is derived from flare luminance for compositing.\n\n"
-               "Connect a Camera to the cam input to take the field of view "
-               "from it (focal length and horizontal aperture) instead of "
-               "the FOV knobs.\n\n"
+               "Connect a Camera to the cam input (directly or through Dot "
+               "and NoOp nodes) to take the field of view from it (focal "
+               "length and horizontal aperture) instead of the FOV knobs; "
+               "Camera > Use Camera turns this off.\n\n"
                "Connect a matte (alpha) to the second input to hide lights "
                "behind foreground objects, or set Matte Mode to Mask to "
                "limit which lights flare.\n\n"
@@ -413,7 +417,7 @@ public:
     int  minimum_inputs() const override { return 1; }
     bool test_input(int idx, Op* op) const override
     {
-        if (idx == 2) return dynamic_cast<CameraOp*>(op) != nullptr;
+        if (idx == 2) return flaresim::accepts_through_passthrough<CameraOp>(op);
         return Iop::test_input(idx, op);
     }
     Op* default_input(int idx) const override
@@ -428,10 +432,12 @@ public:
         return "";
     }
 
-    // The camera on the cam input, if any.
+    // The camera on the cam input (through any Dots or NoOps), unless Use
+    // Camera is off.
     CameraOp* camera_input() const
     {
-        return dynamic_cast<CameraOp*>(Op::input(2));
+        if (!use_camera_) return nullptr;
+        return flaresim::through_passthrough<CameraOp>(Op::input(2));
     }
 
     // ---- rebuild_surf_ui ----
@@ -688,7 +694,20 @@ public:
         SetFlags(f, Knob::HIDDEN);
 
         adv_.add(f, Divider(f, "Camera"));
+        adv_.add(f, Bool_knob(f, &use_camera_, "use_camera", "Use Camera"));
+        Tooltip(f, "With a Camera on the cam input (directly or through Dot and "
+                   "NoOp nodes), take the field of view from its focal length "
+                   "and horizontal aperture, animated, instead of the knobs "
+                   "below.  The line next to it shows what the camera gives.  "
+                   "Turn off to use the knobs below even with a camera "
+                   "connected.");
+        adv_.add(f, String_knob(f, &camera_info_, "camera_info", ""));
+        ClearFlags(f, Knob::STARTLINE);
+        SetFlags(f, Knob::DO_NOT_WRITE | Knob::READ_ONLY);
+        Tooltip(f, "The camera's values used for the flare.  While they are "
+                   "used, the FOV and sensor knobs below are greyed out.");
         adv_.add(f, Bool_knob(f, &fov_use_sensor_, "fov_use_sensor", "Use Sensor Size"));
+        SetFlags(f, Knob::STARTLINE);
         Tooltip(f, "When enabled, FOV is computed from sensor dimensions and focal length.");
         adv_.add(f, Enumeration_knob(f, &sensor_preset_, kPresetNames, "sensor_preset", "Sensor Preset"));
         if (!fov_use_sensor_) SetFlags(f, Knob::DISABLED);

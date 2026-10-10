@@ -25,6 +25,7 @@ cache is used.
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -80,17 +81,10 @@ def lens_path(node):
 
 
 def camera_focal(node):
-    """Focal length (mm) of a camera connected to the node, or 0."""
-    for i in range(node.inputs()):
-        inp = node.input(i)
-        if inp is None or not inp.Class().startswith('Camera'):
-            continue
-        if 'focal' in inp.knobs():
-            try:
-                return float(inp['focal'].value())
-            except (TypeError, ValueError):
-                pass
-    return 0.0
+    """Focal length (mm) of the camera the node uses, or 0."""
+    import FlareSim_Looks
+    values = FlareSim_Looks.camera_values(node)
+    return values[1] if values else 0.0
 
 
 def look_key(node):
@@ -362,7 +356,7 @@ def tick_image():
 PANEL_STYLE = os.environ.get('FLARESIM_PANEL_STYLE', '1').strip().lower() \
     not in ('0', 'false', 'off', 'no')
 _stylers = {}     # node full name -> _PanelStyler for its open panel
-RETRY_MS = (0, 60, 200, 600)   # styling attempts after the panel opens
+RETRY_MS = (0, 60, 200, 600, 1500)   # styling attempts after the panel opens
 
 
 def panel_styling():
@@ -399,14 +393,17 @@ def _find_header_labels(node):
 def _panel_of(label):
     """The widget holding a node's knobs: the nearest parent of the header
     label that also holds the section titles."""
-    w = label.parentWidget()
-    for _ in range(10):
-        if w is None:
-            return None
-        names = set(_plain(l.text()) for l in w.findChildren(QtWidgets.QLabel))
-        if len(names.intersection(SECTION_TITLES)) >= 2:
-            return w
-        w = w.parentWidget()
+    try:
+        w = label.parentWidget()
+        for _ in range(10):
+            if not _alive(w):
+                return None
+            names = set(_plain(l.text()) for l in w.findChildren(QtWidgets.QLabel))
+            if len(names.intersection(SECTION_TITLES)) >= 2:
+                return w
+            w = w.parentWidget()
+    except RuntimeError:     # a stale wrapper (see _innermost_ancestor)
+        pass
     return None
 
 
@@ -446,23 +443,35 @@ def _style_titles(panel):
     return len(titles)
 
 
-def _scroll_viewport(panel):
-    w = panel
-    while w is not None:
-        if isinstance(w, QtWidgets.QAbstractScrollArea):
-            return w.viewport()
-        w = w.parentWidget()
+def _innermost_ancestor(panel, cls):
+    """The closest widget of type cls that contains panel, or None.
+
+    Searched downwards from the panel's window rather than by walking up
+    parentWidget(): Nuke deletes and rebuilds parts of its panel widgets,
+    and PySide2 can hand back a stale wrapper for a parent on the way up
+    ("Internal C++ object already deleted").  isAncestorOf() asks Qt
+    itself, so it is safe."""
+    try:
+        top = panel.window()
+        candidates = [w for w in top.findChildren(cls)
+                      if _alive(w) and w.isAncestorOf(panel)]
+        if isinstance(top, cls) and top.isAncestorOf(panel):
+            candidates.append(top)
+    except RuntimeError:
+        return None
+    for w in candidates:
+        if not any(o is not w and w.isAncestorOf(o) for o in candidates):
+            return w
     return None
+
+
+def _scroll_viewport(panel):
+    area = _innermost_ancestor(panel, QtWidgets.QAbstractScrollArea)
+    return area.viewport() if area is not None else None
 
 
 def _stack_of(panel):
-    w = panel
-    while w is not None:
-        parent = w.parentWidget()
-        if isinstance(parent, QtWidgets.QStackedWidget):
-            return parent
-        w = parent
-    return None
+    return _innermost_ancestor(panel, QtWidgets.QStackedWidget)
 
 
 class _PanelStyler(QtCore.QObject):
@@ -607,10 +616,119 @@ def _style_later(node):
             if n is not None and style_panel(n):
                 state['done'] = True
         except Exception as e:
-            state['done'] = True
-            sys.stderr.write('FlareSim header: %s\n' % e)
+            # Keep trying (Nuke may still be rebuilding the panel); say so once.
+            if not state.get('reported'):
+                state['reported'] = True
+                sys.stderr.write('FlareSim header: %s\n' % e)
     for ms in RETRY_MS:
         QtCore.QTimer.singleShot(ms, attempt)
+
+
+# ---------------------------------------------------------------------------
+# Camera input
+# ---------------------------------------------------------------------------
+# The node reads the camera itself (C++); this keeps the panel honest about
+# it: the header's focal length, the Camera line next to Use Camera, and the
+# FOV and sensor knobs greyed out while the camera drives them.  It runs on
+# Nuke's updateUI, which also fires after undo/redo and on frame changes
+# (animated cameras), and does nothing unless what the camera gives changed.
+
+_cam_state = {}   # node full name -> last camera signature
+
+
+def _camera_signature(node):
+    import FlareSim_Looks
+    values = FlareSim_Looks.camera_values(node)
+    knobs = node.knobs()
+    cam = None
+    try:
+        index = FlareSim_Looks.CAMERA_INPUT.get(node.Class())
+        connected = FlareSim_Looks.upstream(node, index) if index is not None else None
+        cam = connected.name() if connected is not None else None
+    except Exception:
+        pass
+    use = bool(knobs['use_camera'].value()) if 'use_camera' in knobs else True
+    sensor = tuple(knobs[k].value() for k in ('fov_use_sensor', 'fov_auto_v', 'sensor_preset')
+                   if k in knobs)
+    return (values and tuple(round(v, 4) if isinstance(v, float) else v for v in values),
+            cam, use, sensor)
+
+
+def camera_info_text(node, values):
+    knobs = node.knobs()
+    if values is None:
+        import FlareSim_Looks
+        index = FlareSim_Looks.CAMERA_INPUT.get(node.Class())
+        connected = index is not None and FlareSim_Looks.upstream(node, index) is not None
+        if connected and 'use_camera' in knobs and not knobs['use_camera'].value():
+            return 'Camera connected but not used; using the knobs below'
+        return 'No camera; using the knobs below'
+    name, focal, hap, vap = values
+    if focal <= 0.1 or hap <= 0.1:
+        return '%s: no focal length or aperture; using the knobs below' % name
+    fov_h = 2.0 * math.degrees(math.atan(hap / (2.0 * focal)))
+    try:
+        aspect = float(node.width()) / float(node.height())
+    except Exception:
+        aspect = hap / vap if vap > 0 else 16.0 / 9.0
+    fov_v = 2.0 * math.degrees(math.atan(math.tan(math.radians(fov_h) / 2.0) / aspect))
+    return u'%s \u00b7 %g mm \u00b7 %g \u00d7 %g mm \u00b7 FOV %.1f\u00b0 \u00d7 %.1f\u00b0' % (
+        name, round(focal, 2), round(hap, 2), round(vap, 2), fov_h, fov_v)
+
+
+def _set_camera_knobs(node, values):
+    """Grey out the FOV and sensor knobs while the camera drives them, and
+    otherwise enable them as the node does (Use Sensor Size, Auto FOV V,
+    Sensor Preset)."""
+    knobs = node.knobs()
+    if 'camera_info' not in knobs:
+        return
+    cam = values is not None and values[1] > 0.1 and values[2] > 0.1
+    sensor = bool(knobs['fov_use_sensor'].value()) if 'fov_use_sensor' in knobs else False
+    auto_v = bool(knobs['fov_auto_v'].value()) if 'fov_auto_v' in knobs else False
+    custom = 'sensor_preset' in knobs and knobs['sensor_preset'].value() == 'Custom'
+    enabled = {
+        'fov_use_sensor': True,
+        'fov_h': not sensor, 'fov_auto_v': not sensor, 'fov_v': not sensor and not auto_v,
+        'sensor_preset': sensor, 'sensor_w': sensor and custom, 'sensor_h': sensor and custom,
+        'focal_length': sensor,
+    }
+    text = camera_info_text(node, values)
+    try:
+        nuke.Undo.disable()       # display only: keep it out of undo
+    except Exception:
+        pass
+    try:
+        if knobs['camera_info'].value() != text:
+            knobs['camera_info'].setValue(text)
+        for name, on in enabled.items():
+            if name in knobs:
+                knobs[name].setEnabled(on and not cam)
+    finally:
+        try:
+            nuke.Undo.enable()
+        except Exception:
+            pass
+
+
+def sync_camera(node, force=False):
+    """Bring the header and the Camera knobs up to date with the camera."""
+    try:
+        name = node.fullName()
+        sig = _camera_signature(node)
+    except Exception:
+        return
+    if not force and _cam_state.get(name) == sig:
+        return
+    _cam_state[name] = sig
+    import FlareSim_Looks
+    values = FlareSim_Looks.camera_values(node)
+    _set_camera_knobs(node, values)
+    refresh(node)
+
+
+def _on_update_ui():
+    sync_camera(nuke.thisNode())
 
 
 def _on_create():
@@ -623,6 +741,10 @@ def _on_knob_changed():
         return
     if k.name() in TRIGGER_KNOBS:
         refresh(nuke.thisNode())
+    if k.name() in ('showPanel', 'inputChange', 'use_camera', 'fov_use_sensor',
+                    'fov_auto_v', 'sensor_preset'):
+        # A panel that opens again is built with the node's own enable flags.
+        sync_camera(nuke.thisNode(), force=True)
     # Show Advanced reveals more section titles; the styler also catches
     # this, the explicit call covers a panel Nuke rebuilt from scratch.
     if k.name() in ('showPanel', 'show_advanced'):
@@ -636,3 +758,4 @@ def register():
     for cls in NODE_CLASSES:
         nuke.addOnCreate(_on_create, nodeClass=cls)
         nuke.addKnobChanged(_on_knob_changed, nodeClass=cls)
+        nuke.addUpdateUI(_on_update_ui, nodeClass=cls)
