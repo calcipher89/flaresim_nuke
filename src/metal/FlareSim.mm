@@ -860,7 +860,8 @@ public:
                      "Based on the original work by Eamonn Nugent (space55/blackhole-rt)\n"
                      "\n"
                      "Copyright \xC2\xA9 2026 Steve Watts Kennedy (LocalStarlight/flaresim_nuke)\n"
-                     "Copyright \xC2\xA9 2026 Peter Mercell — GPU optimisation\n");
+                     "Copyright \xC2\xA9 2026 Peter Mercell — GPU optimisation\n"
+                     "Copyright \xC2\xA9 2026 Jeff Baldemoro — artist-focused overhaul (FlareSim+)\n");
     }
 
     // ---- knob_changed ----

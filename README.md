@@ -388,6 +388,8 @@ FlareSim is built on the foundational work of **Steve Watts Kennedy** ([LocalSta
 
 The original physics engine is based on the work of **Eamonn Nugent** ([@space55](https://github.com/space55) · [55.dev](https://55.dev/)), whose CPU-based renderer ([blackhole-rt](https://github.com/space55/blackhole-rt/)) provided the ray-tracing foundation.
 
+FlareSim+ is **Jeff Baldemoro**'s artist-focused overhaul of this fork: the Lens Browser, looks, the simpler node panel with Quality presets, placed lights, occlusion mattes, overscan, the camera input and the FlareSim+ panel header.
+
 Tutorial by Steve: [https://youtu.be/yEsBOQNG16Y](https://youtu.be/yEsBOQNG16Y)
 
 ---
