@@ -1485,6 +1485,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._lens_path = ''
         self._look_extra = {}          # look knobs carried through as-is
         self._look_name = ''
+        self._created_node = None
         self._source_colour = QtGui.QColor(255, 255, 255)
         self._surfaces = 0
         self._items = {}               # lens path -> grid item
@@ -1494,6 +1495,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
         # the node; all of them after a look or a lens change.
         self._surf_dirty = set()
         self._surf_all_dirty = False
+        # Look settings changed here since then; every one after a look is
+        # picked.  Apply writes only these, so settings made on the node
+        # are kept.
+        self._knob_dirty = set()
+        self._look_dirty = False
         self._sel_surface = -1
         self._ghost = None             # (surf_a, surf_b) of the picked ghost
         self._picked = []              # [(a, b, share)] from the last pick
@@ -1808,6 +1814,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
         for row in (self.gain, self.blades, self.rotation, self.blur, self.blur_passes,
                     self.intensity, self.fov, self.exposure):
             row.valueChanged.connect(self._schedule_render)
+        for k, row in self._look_rows().items():
+            row.valueChanged.connect(lambda _v, k=k: self._knob_dirty.add(k))
         self.quality.currentIndexChanged.connect(self._schedule_render)
         self.show_source.toggled.connect(self._schedule_render)
         self.view.sourceMoved.connect(self._on_source_moved)
@@ -2555,14 +2563,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self.set_lens(lens, surfaces)
         else:
             self._set_surfaces(surfaces)
-        # A look defines every surface.
+        # A look defines every surface and setting.
         self._surf_all_dirty = True
+        self._look_dirty = True
 
-    def _set_look_values(self, values):
-        rows = {'flare_gain': self.gain, 'aperture_blades': self.blades,
+    def _look_rows(self):
+        return {'flare_gain': self.gain, 'aperture_blades': self.blades,
                 'aperture_rotation': self.rotation, 'ghost_blur': self.blur,
                 'ghost_blur_passes': self.blur_passes}
-        for k, row in rows.items():
+
+    def _set_look_values(self, values):
+        for k, row in self._look_rows().items():
             if k in values:
                 row.blockSignals(True)
                 row.setValue(values[k])
@@ -2653,6 +2664,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if create:
             node = nuke.createNode('FlareSim', inpanel=False)
             self._node = node
+            self._created_node = node
             return [node]
         return []
 
@@ -2693,16 +2705,20 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._set_surfaces(surfaces)
         self._surf_dirty.clear()
         self._surf_all_dirty = False
+        self._knob_dirty.clear()
+        self._look_dirty = False
         self._schedule_render()
 
     def _apply_to_node(self):
         if not self._lens_path:
             QtWidgets.QMessageBox.information(self, 'FlareSim', 'Pick a lens first.')
             return
+        self._created_node = None
         nodes = self._target_nodes(create=True)
         self._update_target_label()
         if not nodes:
             return
+        new_node = self._created_node is not None
         # A new lens (or a look) sets every surface.  Otherwise only the
         # surfaces edited here are written, so tweaks made on the node's
         # Surfaces tab in the meantime are kept.
@@ -2711,6 +2727,12 @@ class LensBrowserWindow(QtWidgets.QWidget):
         all_surfaces = self._surf_all_dirty or not same_lens
         look = self.current_look(self._look_name, surfaces=all_surfaces)
         look['lens'] = self._lens_path
+        # Settings not changed here (Ray Grid, Spectral, Highlight, or the
+        # gain and blur when left alone) keep the node's values.  A picked
+        # look, or a new node, takes them all.
+        if not (self._look_dirty or new_node):
+            look['knobs'] = {k: v for k, v in look['knobs'].items()
+                             if k in self._knob_dirty or _SURF_KNOB_RE.match(k)}
         if not all_surfaces:
             for i in sorted(self._surf_dirty):
                 state = self._surf[i]
@@ -2720,6 +2742,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
         warnings = FlareSim_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
         self._surf_dirty.clear()
         self._surf_all_dirty = False
+        self._knob_dirty.clear()
+        self._look_dirty = False
         self._ref_width = _format_width(nodes[0])
         if warnings:
             QtWidgets.QMessageBox.warning(self, 'FlareSim', '\n'.join(warnings))
