@@ -496,7 +496,8 @@ class _PanelStyler(QtCore.QObject):
         if self._viewport is not None:
             self._viewport.installEventFilter(self)
         if self._stack is not None:
-            self._stack.currentChanged.connect(self._fit_later)
+            self._stack.installEventFilter(self)
+            self._stack.currentChanged.connect(self._tab_changed)
         panel.destroyed.connect(self._forget)
 
     def _forget(self, *_args):
@@ -533,6 +534,7 @@ class _PanelStyler(QtCore.QObject):
         if not panel_styling() or not self.alive():
             return
         _style_titles(self._panel)
+        self._size_tabs_to_current()
         label = self.header_label()
         if label is not None:
             if label.minimumWidth() != 1:
@@ -550,6 +552,33 @@ class _PanelStyler(QtCore.QObject):
             node = nuke.toNode(self._name)
             if node is not None:
                 refresh(node)
+
+    def _tab_changed(self, *_args):
+        self._size_tabs_to_current()
+        self._fit_later()
+
+    def _size_tabs_to_current(self):
+        """Make the tabs only as tall as the one showing.  Qt sizes every
+        tab to the tallest one, and the Surfaces tab gets a row per lens
+        surface, so once a lens is loaded the FlareSim tab was as long as
+        the Surfaces tab (empty space and a scroll bar under the knobs).
+        Hidden tabs get an Ignored vertical size policy, which the tab
+        stack leaves out of its size."""
+        stack = self._stack
+        if stack is None or not _alive(stack):
+            return
+        current = stack.currentWidget()
+        for i in range(stack.count()):
+            page = stack.widget(i)
+            if not _alive(page):
+                continue
+            want = QtWidgets.QSizePolicy.Preferred if page is current \
+                else QtWidgets.QSizePolicy.Ignored
+            policy = page.sizePolicy()
+            if policy.verticalPolicy() != want:
+                page.setSizePolicy(policy.horizontalPolicy(), want)
+                page.updateGeometry()
+                stack.updateGeometry()
 
     def _fit_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_window)
