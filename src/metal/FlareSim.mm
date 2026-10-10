@@ -22,6 +22,7 @@
 
 #include "lens.h"
 #include "occlusion.h"
+#include "node_ui.h"
 #include "ghost.h"
 #include "ghost_metal.h"
 
@@ -172,7 +173,15 @@ public:
     const char* lens_file_;
     float       source_intensity_; // HDR boost for sampled source (default 8, internal ×1000)
     float       flare_gain_;       // artistic ghost multiplier (default 10, internal ×1000)
-    int         ray_grid_;
+    int         ray_grid_;                 // used when Quality is Custom
+    int         quality_;                  // flaresim::Quality
+    int         clip_to_;                  // flaresim::ClipTo
+    int         overscan_w_, overscan_h_;  // Format + Overscan padding, px
+    bool        show_advanced_;
+    flaresim::AdvancedKnobs adv_;          // knobs Show Advanced reveals
+    // Input pixels inside the output bbox, for do_compute().
+    int         pending_src_x0_ = 0, pending_src_y0_ = 0;
+    int         pending_src_x1_ = 0, pending_src_y1_ = 0;
     float       threshold_;
 
     bool        fov_use_sensor_;
@@ -325,7 +334,12 @@ public:
         , lens_file_("")
         , source_intensity_(8.0f)
         , flare_gain_(10.0f)
-        , ray_grid_(64)
+        , ray_grid_(flaresim::kDefaultRayGrid)
+        , quality_(flaresim::kQualityMedium)
+        , clip_to_(flaresim::kClipBBox)
+        , overscan_w_(0)
+        , overscan_h_(0)
+        , show_advanced_(false)
         , threshold_(0.0f)
         , fov_use_sensor_(false)
         , sensor_preset_(0)
@@ -519,10 +533,24 @@ public:
                    "filter lenses with a live flare preview, start from a look, "
                    "then apply it to this node or save it as a look.  The button "
                    "shows the node's current lens.");
+        Bool_knob(f, &show_advanced_, "show_advanced", "Show Advanced");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Show every setting.  Off (default) keeps the panel to the "
+                   "main controls: source, matte, quality, brightness, blur "
+                   "and output.  Hidden settings still apply, and looks and "
+                   "the Lens Browser still set them.");
 
         Divider(f, "Ghost");
-        Int_knob(f,   &ray_grid_,   "ray_grid",      "Ray Grid (NxN)");
-        Tooltip(f, "NxN entrance-pupil samples per source. "
+        Enumeration_knob(f, &quality_, flaresim::kQualityNames, "quality", "Quality");
+        Tooltip(f, "How many rays are traced for each ghost.  Higher = smoother "
+                   "ghosts and a longer render.\n"
+                   "Low, Medium, High and Ultra follow the image width "
+                   "(about 128, 256, 512 and 1024 rays across on a 1920 plate), "
+                   "so a look renders the same at any resolution.  Each step up "
+                   "takes about four times as long.\n"
+                   "Custom: set Ray Grid yourself.");
+        Int_knob(f, &ray_grid_, "ray_grid", "Ray Grid (NxN)");
+        Tooltip(f, "Custom Quality: NxN entrance-pupil samples per source.  "
                    "Higher = smoother ghosts, longer render time.");
 
         Float_knob(f, &flare_gain_, "flare_gain",    "Flare Gain");
@@ -533,16 +561,16 @@ public:
         static const char* const kJitterModes[] = {
             "Off", "Stratified", "Halton", nullptr
         };
-        Enumeration_knob(f, &pupil_jitter_, kJitterModes, "pupil_jitter", "Pupil Jitter");
+        adv_.add(f, Enumeration_knob(f, &pupil_jitter_, kJitterModes, "pupil_jitter", "Pupil Jitter"));
         Tooltip(f, "Entrance-pupil sampling pattern.\n"
                    "Off: regular NxN grid — fastest, but visible dot pattern at low ray counts.\n"
                    "Stratified: one randomly-placed sample per grid cell — breaks up the dot pattern.\n"
                    "Halton: quasi-random low-discrepancy sequence — deterministic, very even coverage.");
 
-        Int_knob(f, &jitter_seed_, "jitter_seed", "Jitter Seed");
+        adv_.add(f, Int_knob(f, &jitter_seed_, "jitter_seed", "Jitter Seed"));
         Tooltip(f, "Integer seed for the stratified noise pattern. "
                    "Only used when Auto Seed is off and Pupil Jitter is Stratified.");
-        Bool_knob(f, &jitter_auto_seed_, "jitter_auto_seed", "Auto Seed");
+        adv_.add(f, Bool_knob(f, &jitter_auto_seed_, "jitter_auto_seed", "Auto Seed"));
         Tooltip(f, "When on (the default), the jitter seed is automatically set to the current "
                    "frame number, so sample positions change on every frame without any manual "
                    "keyframing — equivalent to animating Jitter Seed = frame.\n\n"
@@ -578,11 +606,11 @@ public:
                    "over Sample Radius, so the flare picks up the colour (and "
                    "brightness) of the light it sits on.  Off by default.  "
                    "Off screen the light keeps its Light Colour.");
-        Int_knob(f, &manual_sample_radius_, "manual_sample_radius", "Sample Radius");
+        adv_.add(f, Int_knob(f, &manual_sample_radius_, "manual_sample_radius", "Sample Radius"));
         Tooltip(f, "With Colour From Plate: radius (in pixels) of the area "
                    "averaged around Source XY for the light's colour.  Larger "
                    "values are more robust to sub-pixel tracking jitter.  Default 4.");
-        Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Blend (px)");
+        adv_.add(f, Float_knob(f, &outside_source_falloff_, "outside_source_falloff", "Edge Blend (px)"));
         SetRange(f, 0.0, 200.0);
         Tooltip(f, "With Colour From Plate: blend zone in pixels at the frame "
                    "edge, where the plate colour fades to the plain Light Colour "
@@ -601,14 +629,14 @@ public:
                    "Default 0.\n\n"
                    "In Auto Detect mode, gates each downsampled block.");
 
-        Divider(f, "Source Extraction");
-        Int_knob(f, &source_downsample_, "source_downsample", "Downsample");
+        adv_.add(f, Divider(f, "Source Extraction"));
+        adv_.add(f, Int_knob(f, &source_downsample_, "source_downsample", "Downsample"));
         SetRange(f, 1.0, 16.0);
         Tooltip(f, "Block size (in pixels) for downsampling input 0 when "
                    "extracting sources in Auto Detect mode.  One BrightPixel "
                    "is emitted per block whose average luma is above Threshold.  "
                    "Larger = fewer sources, faster.  Default 4.");
-        Int_knob(f, &max_sources_, "max_sources", "Max Sources");
+        adv_.add(f, Int_knob(f, &max_sources_, "max_sources", "Max Sources"));
         SetRange(f, 1.0, 512.0);
         Tooltip(f, "Hard cap on the number of flare sources extracted in "
                    "Auto Detect mode.  When more survive the Threshold, only "
@@ -624,7 +652,8 @@ public:
                    "out smoothly as it slides behind an edge.\n"
                    "Mask: white lets the light through; only lights inside the "
                    "white area flare.\n"
-                   "Lights outside the frame are not affected.\n\nAuto Detect: each detected light is dimmed by the matte at its own spot.");
+                   "Lights outside the frame are not affected, unless the matte's "
+                   "bbox reaches them (the overscan of an undistorted plate).\n\nAuto Detect: each detected light is dimmed by the matte at its own spot.");
         Float_knob(f, &light_size_, "light_size", "Light Size");
         SetRange(f, 1.0, 100.0);
         Tooltip(f, "Diameter in pixels of the light as the matte sees it.  The "
@@ -641,78 +670,78 @@ public:
         Float_knob(f, &outside_source_intensity_, "outside_source_intensity", "Outside Intensity");
         SetFlags(f, Knob::HIDDEN);
 
-        Divider(f, "Camera");
-        Bool_knob(f, &fov_use_sensor_, "fov_use_sensor", "Use Sensor Size");
+        adv_.add(f, Divider(f, "Camera"));
+        adv_.add(f, Bool_knob(f, &fov_use_sensor_, "fov_use_sensor", "Use Sensor Size"));
         Tooltip(f, "When enabled, FOV is computed from sensor dimensions and focal length.");
-        Enumeration_knob(f, &sensor_preset_, kPresetNames, "sensor_preset", "Sensor Preset");
+        adv_.add(f, Enumeration_knob(f, &sensor_preset_, kPresetNames, "sensor_preset", "Sensor Preset"));
         if (!fov_use_sensor_) SetFlags(f, Knob::DISABLED);
         Tooltip(f, "Common sensor size presets. Selecting a preset fills Sensor Width and Height.");
 
-        Float_knob(f, &fov_h_deg_,  "fov_h",         "FOV H (deg)");
+        adv_.add(f, Float_knob(f, &fov_h_deg_,  "fov_h",         "FOV H (deg)"));
         SetRange(f, 1.0, 180.0);
         if (fov_use_sensor_) SetFlags(f, Knob::DISABLED);
         Tooltip(f, "Horizontal field of view of the input image in degrees.");
-        Bool_knob(f, &fov_auto_v_,  "fov_auto_v",    "Auto FOV V");
+        adv_.add(f, Bool_knob(f, &fov_auto_v_,  "fov_auto_v",    "Auto FOV V"));
         if (fov_use_sensor_) SetFlags(f, Knob::DISABLED);
         Tooltip(f, "Derive vertical FOV from horizontal FOV and image aspect ratio.");
-        Float_knob(f, &fov_v_deg_,  "fov_v",         "FOV V (deg)");
+        adv_.add(f, Float_knob(f, &fov_v_deg_,  "fov_v",         "FOV V (deg)"));
         if (fov_auto_v_ || fov_use_sensor_) SetFlags(f, Knob::DISABLED);
         Tooltip(f, "Vertical field of view in degrees. Ignored when Auto FOV V is enabled.");
 
-        Float_knob(f, &sensor_w_mm_,      "sensor_w",      "Sensor Width (mm)");
+        adv_.add(f, Float_knob(f, &sensor_w_mm_,      "sensor_w",      "Sensor Width (mm)"));
         SetRange(f, 1.0, 100.0);
         if (!fov_use_sensor_) SetFlags(f, Knob::DISABLED);
-        Float_knob(f, &sensor_h_mm_,      "sensor_h",      "Sensor Height (mm)");
+        adv_.add(f, Float_knob(f, &sensor_h_mm_,      "sensor_h",      "Sensor Height (mm)"));
         SetRange(f, 1.0, 100.0);
         if (!fov_use_sensor_) SetFlags(f, Knob::DISABLED);
-        Float_knob(f, &focal_length_mm_,  "focal_length",  "Focal Length (mm)");
+        adv_.add(f, Float_knob(f, &focal_length_mm_,  "focal_length",  "Focal Length (mm)"));
         SetRange(f, 1.0, 2000.0);
         if (!fov_use_sensor_) SetFlags(f, Knob::DISABLED);
 
-        Divider(f, "Aperture");
-        Int_knob(f, &aperture_blades_, "aperture_blades", "Aperture Blades");
+        adv_.add(f, Divider(f, "Aperture"));
+        adv_.add(f, Int_knob(f, &aperture_blades_, "aperture_blades", "Aperture Blades"));
         SetRange(f, 0.0, 16.0);
         Tooltip(f, "0 = circular aperture. 3–16 = regular polygon — affects ghost shape.");
-        Float_knob(f, &aperture_rotation_, "aperture_rotation", "Aperture Rotation");
+        adv_.add(f, Float_knob(f, &aperture_rotation_, "aperture_rotation", "Aperture Rotation"));
         SetRange(f, -180.0, 180.0);
         Tooltip(f, "Rotation of the aperture polygon in degrees.");
 
-        Divider(f, "Spectral");
+        adv_.add(f, Divider(f, "Spectral"));
         static const char* const kSpecNames[] = { "3 (R/G/B)", "5", "7", "9", "11", "15", "21", "31", nullptr };
-        Enumeration_knob(f, &spectral_idx_, kSpecNames, "spectral_samples", "Spectral Samples");
+        adv_.add(f, Enumeration_knob(f, &spectral_idx_, kSpecNames, "spectral_samples", "Spectral Samples"));
         Tooltip(f, "Number of wavelength samples for chromatic aberration. "
                    "3 = classic R/G/B (fastest). Higher = smoother colour fringing.");
-        Bool_knob(f, &spectral_jitter_, "spectral_jitter", "Spectral Jitter");
+        adv_.add(f, Bool_knob(f, &spectral_jitter_, "spectral_jitter", "Spectral Jitter"));
         Tooltip(f, "Randomise each ray's wavelength within its spectral bin.\n"
                    "Smooths the hard colour boundaries between discrete wavelength\n"
                    "samples at no extra ray-trace cost.  The noise pattern changes\n"
                    "per frame when Auto Seed is on, enabling temporal accumulation.");
-        Int_knob(f, &spectral_jitter_seed_, "spectral_jitter_seed", "Spectral Jitter Seed");
+        adv_.add(f, Int_knob(f, &spectral_jitter_seed_, "spectral_jitter_seed", "Spectral Jitter Seed"));
         Tooltip(f, "Fixed seed for the spectral jitter noise pattern.\n"
                    "Only used when Spectral Jitter Auto Seed is off.");
-        Bool_knob(f, &spectral_jitter_auto_seed_, "spectral_jitter_auto_seed", "Auto Seed");
+        adv_.add(f, Bool_knob(f, &spectral_jitter_auto_seed_, "spectral_jitter_auto_seed", "Auto Seed"));
         Tooltip(f, "Derive spectral jitter seed from the current frame number.\n"
                    "Gives a different noise pattern each frame for temporal accumulation.");
-        Float_knob(f, &spectral_jitter_scale_, "spectral_jitter_scale", "Jitter Scale");
+        adv_.add(f, Float_knob(f, &spectral_jitter_scale_, "spectral_jitter_scale", "Jitter Scale"));
         SetRange(f, 0.0, 3.0);
         Tooltip(f, "Multiplier on spectral jitter range.\n"
                    "1.0 = jitter covers one spectral bin width (default).\n"
                    "0.5 = subtle, half-bin jitter.  2.0 = aggressive cross-bin blending.");
 
-        Divider(f, "Highlight");
-        Bool_knob(f, &highlight_compress_, "highlight_compress", "Highlight Compression");
+        adv_.add(f, Divider(f, "Highlight"));
+        adv_.add(f, Bool_knob(f, &highlight_compress_, "highlight_compress", "Highlight Compression"));
         Tooltip(f, "Apply soft-clip to ghost highlights.\n"
                    "Prevents hard clipped edges and super-white values.");
         static const char* const kMetricNames[] = { "Value", "Luminance", "Lightness", nullptr };
-        Enumeration_knob(f, &highlight_metric_, kMetricNames, "highlight_metric", "Metric");
+        adv_.add(f, Enumeration_knob(f, &highlight_metric_, kMetricNames, "highlight_metric", "Metric"));
         Tooltip(f, "Which measure to compress:\n"
                    "Value = max(R,G,B) — clips the brightest channel.\n"
                    "Luminance = Rec.709 weighted sum — perceptually balanced.\n"
                    "Lightness = cube root of luminance — more aggressive on bright areas.");
-        Float_knob(f, &highlight_clip_, "highlight_clip", "Clip");
+        adv_.add(f, Float_knob(f, &highlight_clip_, "highlight_clip", "Clip"));
         SetRange(f, 0.1, 10.0);
         Tooltip(f, "Maximum output value (asymptotic ceiling).  Default 2.0.");
-        Float_knob(f, &highlight_knee_, "highlight_knee", "Knee");
+        adv_.add(f, Float_knob(f, &highlight_knee_, "highlight_knee", "Knee"));
         SetRange(f, 0.0, 1.0);
         Tooltip(f, "Transition sharpness.\n"
                    "0 = very soft, gradual rolloff.\n"
@@ -723,8 +752,25 @@ public:
         Divider(f, "Post-process");
         Float_knob(f, &ghost_blur_,        "ghost_blur",        "Ghost Blur");
         Tooltip(f, "Post-splat blur radius as a fraction of the image diagonal. 0 = off.");
-        Int_knob(f,   &ghost_blur_passes_, "ghost_blur_passes", "Ghost Blur Passes");
+        adv_.add(f, Int_knob(f,   &ghost_blur_passes_, "ghost_blur_passes", "Ghost Blur Passes"));
         Tooltip(f, "Number of box-blur passes. 3 approximates a Gaussian.");
+
+        Divider(f, "Output");
+        Enumeration_knob(f, &clip_to_, flaresim::kClipNames, "clip_to", "Clip To");
+        Tooltip(f, "Area the flare is rendered into.\n"
+                   "BBox (default): the input's bbox.  On an undistorted plate "
+                   "that already includes its overscan.\n"
+                   "Format: crop to the format.\n"
+                   "Format + Overscan: the format grown by Overscan on each "
+                   "side, so ghosts that fall outside the frame are kept for "
+                   "redistorting.");
+        Int_knob(f, &overscan_w_, "overscan_w", "Overscan");
+        SetRange(f, 0.0, 500.0);
+        Tooltip(f, "Format + Overscan: extra pixels added left and right of the format.");
+        Int_knob(f, &overscan_h_, "overscan_h", "");
+        ClearFlags(f, Knob::STARTLINE);
+        SetRange(f, 0.0, 500.0);
+        Tooltip(f, "Format + Overscan: extra pixels added at the top and bottom of the format.");
 
         // ---- Per-surface toggle + gain tab ----
         Tab_knob(f, "Surfaces");
@@ -786,6 +832,43 @@ public:
     // ---- knob_changed ----
     int knob_changed(Knob* k) override
     {
+        auto sync_simple_ui = [this]() {
+            adv_.show(show_advanced_);
+            if (Knob* x = knob("ray_grid"))
+                x->visible(quality_ == flaresim::kQualityCustom);
+            const bool over = (clip_to_ == flaresim::kClipOverscan);
+            if (Knob* x = knob("overscan_w")) x->enable(over);
+            if (Knob* x = knob("overscan_h")) x->enable(over);
+        };
+        if (k->is("showPanel")) {
+            // A script saved before Quality existed keeps its own Ray Grid.
+            if (quality_ != flaresim::kQualityCustom &&
+                ray_grid_ != flaresim::kDefaultRayGrid) {
+                quality_ = flaresim::kQualityCustom;
+                if (Knob* q = knob("quality")) q->set_value(quality_);
+            }
+            sync_simple_ui();
+            // fall through
+        }
+        if (k->is("show_advanced") || k->is("clip_to")) {
+            sync_simple_ui();
+            return 1;
+        }
+        if (k->is("quality")) {
+            // Custom starts from the grid the preset was using; a preset
+            // puts Ray Grid back to its default so the preset applies.
+            Knob* rg = knob("ray_grid");
+            if (quality_ == flaresim::kQualityCustom) {
+                if (rg && ray_grid_ == flaresim::kDefaultRayGrid) {
+                    const int fw = info_.format().width();
+                    rg->set_value(flaresim::quality_ray_grid(flaresim::kQualityMedium, fw));
+                }
+            } else if (rg) {
+                rg->set_value(flaresim::kDefaultRayGrid);
+            }
+            sync_simple_ui();
+            return 1;
+        }
         // Enable/disable knob groups based on Source Mode.
         // Handled on both showPanel (initial layout) and source_mode change.
         auto sync_source_mode_enabled = [this]() {
@@ -904,6 +987,7 @@ public:
     void _validate(bool for_real) override
     {
         copy_info();
+        flaresim::clip_output_box(info_, info_.format(), clip_to_, overscan_w_, overscan_h_);
 
         info_.turn_on(Chan_Red);
         info_.turn_on(Chan_Green);
@@ -958,6 +1042,13 @@ public:
             pending_fmt_h_    = fmt.height();
             pending_num_surfs_  = lens_.num_surfaces();  // thread-safe snapshot
             pending_frame_     = (int)outputContext().frame();
+            {
+                const auto& ib = input0().info();
+                pending_src_x0_ = std::max(pending_x0_, ib.x());
+                pending_src_y0_ = std::max(pending_y0_, ib.y());
+                pending_src_x1_ = std::min(pending_x1_, ib.r());
+                pending_src_y1_ = std::min(pending_y1_, ib.t());
+            }
             needs_compute_ = true;
         }
     }
@@ -1007,6 +1098,10 @@ public:
         const int y0 = pending_y0_;
         const int x1 = pending_x1_;
         const int y1 = pending_y1_;
+        // Where the input has pixels.  Clip To can make the output bigger
+        // than the input's bbox; plate reads stay inside it.
+        const int src_x0 = pending_src_x0_, src_y0 = pending_src_y0_;
+        const int src_x1 = pending_src_x1_, src_y1 = pending_src_y1_;
 
         float fov_h, fov_v;
         if (fov_use_sensor_) {
@@ -1041,10 +1136,10 @@ public:
         const int sr   = std::max(manual_sample_radius_, 1);
         const int mx   = (int)std::round(manual_xy_[0]);
         const int my   = (int)std::round(manual_xy_[1]);
-        const int sy0  = std::max(y0, my - sr);
-        const int sy1  = std::min(y1, my + sr + 1);
-        const int sx0  = std::max(x0, mx - sr);
-        const int sx1  = std::min(x1, mx + sr + 1);
+        const int sy0  = std::max(src_y0, my - sr);
+        const int sy1  = std::min(src_y1, my + sr + 1);
+        const int sx0  = std::max(src_x0, mx - sr);
+        const int sx1  = std::min(src_x1, mx + sr + 1);
 
         // ---- Determine how far the source is inside the format rect ----
         // Positive = inside, negative = outside.
@@ -1075,10 +1170,10 @@ public:
         {
             float sum_r = 0, sum_g = 0, sum_b = 0;
             int   cnt   = 0;
-            Row sample_row(x0, x1);
+            Row sample_row(src_x0, src_x1);
             for (int iy = sy0; iy < sy1; ++iy)
             {
-                input0().get(iy, x0, x1, Mask_RGB, sample_row);
+                input0().get(iy, src_x0, src_x1, Mask_RGB, sample_row);
                 if (Op::aborted()) { zero_buffers(); return; }
                 const float* rp = sample_row[Chan_Red];
                 const float* gp = sample_row[Chan_Green];
@@ -1109,7 +1204,7 @@ public:
             if (emit_source && input(1)) {
                 const float vis = flaresim::matte_visibility(
                     input(1), matte_mode_, (float)mx, (float)my, light_size_ * 0.5f,
-                    x0, y0, x1, y1, pending_fmt_x0_, pending_fmt_y0_,
+                    pending_fmt_x0_, pending_fmt_y0_,
                     pending_fmt_w_, pending_fmt_h_);
                 if (Op::aborted()) { zero_buffers(); return; }
                 final_r *= vis;  final_g *= vis;  final_b *= vis;
@@ -1138,6 +1233,9 @@ public:
             // and Max Sources (brightness-sorted cap).
             // ================================================================
 
+            // Scan only the input's pixels inside the output bbox.
+            const int x0 = src_x0, y0 = src_y0;
+            const int x1 = std::max(src_x1, src_x0), y1 = std::max(src_y1, src_y0);
             const int ds = std::max(source_downsample_, 1);
             const int w  = x1 - x0;
             const int h  = y1 - y0;
@@ -1149,7 +1247,7 @@ public:
             std::vector<float> blk_b   (dw * dh, 0.0f);
             std::vector<int>   blk_cnt (dw * dh, 0);
 
-            Row input_row(x0, x1);
+            Row input_row(x0, std::max(x1, x0 + 1));
             for (int iy = y0; iy < y1; ++iy)
             {
                 input0().get(iy, x0, x1, Mask_RGB, input_row);
@@ -1221,7 +1319,7 @@ public:
                                      * pending_fmt_h_ + fmt_cy;
                     const float vis = flaresim::matte_visibility(
                         input(1), matte_mode_, px, py, light_size_ * 0.5f,
-                        x0, y0, x1, y1, pending_fmt_x0_, pending_fmt_y0_,
+                        pending_fmt_x0_, pending_fmt_y0_,
                         pending_fmt_w_, pending_fmt_h_);
                     if (vis <= 1e-4f) continue;
                     bp.r *= vis;  bp.g *= vis;  bp.b *= vis;
@@ -1252,7 +1350,7 @@ public:
         const float sensor_half_h = lens_.focal_length * std::tan(fov_v * 0.5f);
 
         GhostConfig cfg;
-        cfg.ray_grid              = ray_grid_;
+        cfg.ray_grid              = flaresim::effective_ray_grid(quality_, ray_grid_, pending_fmt_w_);
         cfg.gain                  = flare_gain_ * 1000.0f;
         cfg.aperture_blades       = aperture_blades_;
         cfg.aperture_rotation_deg = aperture_rotation_;
@@ -1391,7 +1489,12 @@ public:
             int radius = 0;
             if (ghost_blur_ > 0.0f && ghost_blur_passes_ > 0)
             {
-                float diag = std::sqrt((float)w * w + (float)h * h);
+                // Sized from the format when Clip To sets the bbox, so
+                // changing the overscan doesn't change the blur.
+                const bool by_bbox = (clip_to_ == flaresim::kClipBBox);
+                const float bw = by_bbox ? (float)w : (float)pending_fmt_w_;
+                const float bh = by_bbox ? (float)h : (float)pending_fmt_h_;
+                float diag = std::sqrt(bw * bw + bh * bh);
                 radius = std::max(1, (int)std::round(ghost_blur_ * diag));
             }
             launch_blur_alpha_readback_metal(
@@ -1476,10 +1579,8 @@ public:
         input0().request(info_.x(), info_.y(), info_.r(), info_.t(),
                          Mask_RGB, count);
 
-        // If a matte is connected, request its alpha over the full frame too.
-        if (input(1))
-            input(1)->request(info_.x(), info_.y(), info_.r(), info_.t(),
-                              Mask_Alpha, count);
+        // If a matte is connected, request its alpha over its whole bbox.
+        flaresim::request_matte(input(1), count);
 
         // Pass non-RGBA channels through for the requested region only.
         ChannelSet passthru(channels);

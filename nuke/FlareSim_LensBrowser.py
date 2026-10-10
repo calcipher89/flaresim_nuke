@@ -2568,7 +2568,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 row.setValue(values[k])
                 row.blockSignals(False)
         self._look_extra = {k: v for k, v in values.items()
-                            if k not in _EDITED_KNOBS and not _SURF_KNOB_RE.match(k)}
+                            if k not in _EDITED_KNOBS and not _SURF_KNOB_RE.match(k)
+                            and k not in FlareSim_Looks.SKIPPED_KNOBS}
         if self._look_extra:
             self.extra_label.setText('Also from the look: %d more settings (highlight, '
                                      'spectral...) kept as they are.'

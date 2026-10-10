@@ -26,13 +26,14 @@ static const char* const kMatteModes[] = {
     "Occlude", "Mask", nullptr
 };
 
-// Average matte alpha over a disc of `radius` pixels centred on (cx, cy),
-// clipped to [x0, x1) x [y0, y1).  Samples outside that box count as 0.
-// At most 15x15 samples, so it stays cheap for many Auto Detect sources.
-inline float matte_disc_coverage(DD::Image::Iop* matte, float cx, float cy,
-                                 float radius, int x0, int y0, int x1, int y1)
+// Average matte alpha over a disc of `radius` pixels centred on (cx, cy).
+// Samples outside the matte's bbox count as 0.  At most 15x15 samples, so
+// it stays cheap for many Auto Detect sources.
+inline float matte_disc_coverage(DD::Image::Iop* matte, float cx, float cy, float radius)
 {
     using namespace DD::Image;
+    const int x0 = matte->info().x(), y0 = matte->info().y();
+    const int x1 = matte->info().r(), y1 = matte->info().t();
     radius = std::max(radius, 0.5f);
     const int n = std::min(15, std::max(1, (int)std::ceil(radius * 2.0f)));
     const float step = 2.0f * radius / n;
@@ -67,17 +68,31 @@ inline float matte_disc_coverage(DD::Image::Iop* matte, float cx, float cy,
 }
 
 // How much of a light at (cx, cy) gets through: 1 = all, 0 = none.
-// Lights outside the format are left alone (the matte has nothing there),
-// so Outside Source keeps working.
+// Lights outside both the format and the matte's bbox are left alone (the
+// matte has nothing there).  A matte that covers the overscan of an
+// undistorted plate also works on lights out there.
 inline float matte_visibility(DD::Image::Iop* matte, int mode, float cx, float cy,
-                              float radius, int x0, int y0, int x1, int y1,
+                              float radius,
                               int fmt_x0, int fmt_y0, int fmt_w, int fmt_h)
 {
     if (!matte) return 1.0f;
-    if (cx < fmt_x0 || cx >= fmt_x0 + fmt_w || cy < fmt_y0 || cy >= fmt_y0 + fmt_h)
+    const bool in_format = cx >= fmt_x0 && cx < fmt_x0 + fmt_w &&
+                           cy >= fmt_y0 && cy < fmt_y0 + fmt_h;
+    const bool in_matte  = cx >= matte->info().x() && cx < matte->info().r() &&
+                           cy >= matte->info().y() && cy < matte->info().t();
+    if (!in_format && !in_matte)
         return 1.0f;
-    const float cov = matte_disc_coverage(matte, cx, cy, radius, x0, y0, x1, y1);
+    const float cov = matte_disc_coverage(matte, cx, cy, radius);
     return mode == kMatteMask ? cov : 1.0f - cov;
+}
+
+// Ask for the matte's alpha over its whole bbox, wherever the lights are.
+inline void request_matte(DD::Image::Iop* matte, int count)
+{
+    if (matte)
+        matte->request(matte->info().x(), matte->info().y(),
+                       matte->info().r(), matte->info().t(),
+                       DD::Image::Mask_Alpha, count);
 }
 
 } // namespace flaresim

@@ -12,6 +12,22 @@ The original FlareSim is a Windows/Nuke 16 plugin built on CUDA 13. This fork ad
 
 ## What's New
 
+### Simpler Node Panel
+
+The node opens with just the main controls: Lens Browser, Source, Matte, **Quality**, **Flare Gain**, **Ghost Blur** and **Output**. Tick **Show Advanced** to see everything else (Source Extraction, Pupil Jitter, Camera, Distance, Aperture, Spectral, Highlight, Blur Passes, Sample Radius, Edge Blend, Source Cap). Hidden settings still apply, and looks and the Lens Browser still set them.
+
+- **Quality** — **Low**, **Medium** (default), **High**, **Ultra** or **Custom**. The presets follow the image width, about 128, 256, 512 and 1024 rays across on a 1920 plate, so a look renders the same at any resolution. Each step up takes about four times as long. **Custom** shows **Ray Grid** to set it yourself. Scripts saved with their own Ray Grid open as Custom and keep it; scripts on the old default (64) now render at Medium. Looks no longer set the ray grid.
+
+### Overscan (Clip To)
+
+For an undistort → FlareSim → redistort workflow. **Clip To** in the Output section sets the area the flare is rendered into:
+
+- **BBox** (default) — the input's bbox, as before. An undistorted plate's bbox already includes its overscan, and Auto Detect finds lights out there too.
+- **Format** — crop the flare to the format.
+- **Format + Overscan** — the format grown by **Overscan** (width, height) pixels on each side, so ghosts that fall outside the frame are kept for redistorting.
+
+FOV still matches the format, so ghosts land in the same place whichever you pick. Ghost Blur is sized from the format in Format and Format + Overscan, so changing the overscan doesn't change the blur. The matte now works across its whole bbox, so a matte that covers the overscan also hides lights out there.
+
 ### FlareSim3D — Camera + Axis driven flares
 
 A new node that takes a **Camera** and an **Axis** (light position) as inputs instead of a manual Source XY. The Axis world position is projected through the Camera to derive screen position and source distance automatically — no manual XY tracking needed. Connect a Camera and an Axis, and the flare tracks the 3D source through the shot.
@@ -39,7 +55,7 @@ A light that goes behind a foreground object stops flaring. Connect a roto, or t
 - **Matte Mode** — **Occlude** (default): white in the matte hides the light. **Mask**: white lets the light through, so only lights inside the white area flare (what the input was meant for in the original FlareSim).
 - **Light Size** — diameter in pixels of the light as the matte sees it. Bigger gives a slower fade across an edge. Default 8.
 - Manual XY and FlareSim3D measure at the light's position (FlareSim3D uses where the Axis projects through the Camera). Auto Detect dims each detected light at its own spot, before **Max Sources**, so hidden lights don't use up places.
-- Lights outside the frame are not affected.
+- Lights outside the frame are not affected, unless the matte's bbox reaches them (the overscan of an undistorted plate).
 - The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
 
 ### Spectral Jitter
@@ -175,22 +191,22 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 **FlareSim** (2D source):
 1. Connect your plate to the input.
 2. Click **Lens Browser** on the node to pick a lens with a live preview. The button shows the node's current lens.
-3. Set **FOV H** to match your camera.
+3. Tick **Show Advanced** and set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
    - Adjust **Threshold** until only the lights you want are marked.
-   - Raise **Cluster Radius** so each large light (a headlight, the sun) counts as one source instead of many.
+   - Under **Show Advanced**, raise **Cluster Radius** so each large light (a headlight, the sun) counts as one source instead of many.
    - Use **Source Cap** to stop one very hot light from overpowering the rest, and **Max Sources** to cap how many are traced.
    - Set **View** back to **Flare** for renders.
 
    To place a light yourself instead, switch **Source Mode** to **Manual XY**, put **Source XY** where the light is (animate it or link it to a Tracker), and set **Light Colour** and **Source Intensity**.
-5. Adjust **Flare Gain** to taste.
+5. Adjust **Flare Gain** to taste, and raise **Quality** for the final render.
 
 **FlareSim3D** (3D source):
 1. Connect your plate to input 0, Camera to input 1, Axis (at the light position) to input 2.
 2. Click **Lens Browser** to pick a lens.
 3. The flare tracks the Axis through the Camera automatically.
-4. Enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
+4. Under **Show Advanced**, enable **Intensity Falloff** and set **Reference Distance** for distance-based dimming.
 5. Set **Light Colour** and **Source Intensity**; the flare keeps going when the Axis leaves the frame.
 6. If the light passes behind something, connect a matte of it to the **matte** input (see Occlusion Matte).
 

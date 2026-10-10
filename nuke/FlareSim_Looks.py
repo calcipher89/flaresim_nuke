@@ -33,7 +33,6 @@ USER_LOOKS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'loo
 # threshold, camera/FOV, seeds) are deliberately left out.
 LOOK_KNOBS = (
     'flare_gain',
-    'ray_grid',
     'pupil_jitter',
     'aperture_blades',
     'aperture_rotation',
@@ -47,6 +46,10 @@ LOOK_KNOBS = (
     'ghost_blur',
     'ghost_blur_passes',
 )
+
+# Render settings a look no longer carries.  Older look files still list
+# them; applying a look leaves the node's Quality alone.
+SKIPPED_KNOBS = ('ray_grid',)
 
 # Per-surface override knobs (Surfaces tab) and their defaults.
 MAX_SURFS = 50
@@ -284,7 +287,7 @@ def apply_look(look, nodes, reset_surfaces=True):
                     if k in knobs:
                         _set_knob_value(knobs[k], default)
             for k, v in values.items():
-                if k in knobs:
+                if k in knobs and k not in SKIPPED_KNOBS:
                     _set_knob_value(knobs[k], v)
         finally:
             undo.end()
