@@ -7,9 +7,12 @@ focal length when a camera is connected (or the lens's own focal length and
 f-stop).  It is drawn into a PNG (plus an @2x copy for high-DPI screens)
 under ~/.nuke/FlareSim/headers and shown by the node's "header" Text knob.
 
-It is redrawn when the panel opens and when the lens, the look or the
-inputs change (not while a script loads, so big scripts open as fast as
-before).  The look thumbnail is the Lens Browser's preview, saved on
+It is set when a node is created or loaded, so it is there the first time
+the panel opens, and redrawn when the lens, the look or the inputs change.
+Nuke draws a Text knob's text once, when the panel is built, so a change
+while the panel is open is also pushed to the panel's label.  Header images
+are cached, so a script with many FlareSim nodes draws each header once.
+The look thumbnail is the Lens Browser's preview, saved on
 Apply to Node; until there is one, the lens thumbnail from the browser's
 cache is used.
 """
@@ -17,6 +20,7 @@ cache is used.
 import hashlib
 import json
 import os
+import re
 import sys
 
 import nuke
@@ -267,11 +271,39 @@ def refresh(node):
         return
     try:
         path = header_image(header_info(node)).replace('\\', '/')
-        html = '<img src="%s" width="%d" height="%d">' % (path, SIZE[0], SIZE[1])
-        if node['header'].value() != html:
+        html = '<img src="%s" width="%d" height="%d">%s' % (
+            path, SIZE[0], SIZE[1], _node_tag(node))
+        old = node['header'].value()
+        if old != html:
             node['header'].setValue(html)
+            _update_open_panels(node, old, html)
     except Exception as e:
         sys.stderr.write('FlareSim header: %s\n' % e)
+
+
+def _node_tag(node):
+    """An invisible tag naming the node, so its panel's label can be told
+    apart from another node's showing the same lens."""
+    return '<!--flaresim:%s-->' % node.fullName()
+
+
+def _update_open_panels(node, old, html):
+    """Show a new header in panels that are already open.  Nuke builds a
+    Text knob's label when the panel opens and doesn't redraw it on
+    setValue, so find the labels still showing the old header."""
+    src = re.search(r'src="[^"]*"', old or '')
+    if not src:
+        return
+    labels = [w for w in QtWidgets.QApplication.allWidgets()
+              if isinstance(w, QtWidgets.QLabel) and src.group(0) in w.text()]
+    tag = _node_tag(node)
+    tagged = [w for w in labels if tag in w.text()]
+    for w in (tagged or labels):
+        w.setText(html)
+
+
+def _on_create():
+    refresh(nuke.thisNode())
 
 
 def _on_knob_changed():
@@ -285,4 +317,5 @@ def register():
     if not getattr(nuke, 'GUI', True):
         return
     for cls in NODE_CLASSES:
+        nuke.addOnCreate(_on_create, nodeClass=cls)
         nuke.addKnobChanged(_on_knob_changed, nodeClass=cls)
