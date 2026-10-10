@@ -108,6 +108,11 @@ struct GPUSpectralSample
     float rw, gw, bw; // linear RGB contribution weights
 };
 
+// True when a CUDA GPU is usable in this process.  Otherwise false, with a
+// message for the artist in *out_error (no GPU, driver too old, ...).  The
+// check runs once; later calls return the cached answer.
+bool cuda_device_check(std::string* out_error);
+
 // Launch the CUDA ghost rendering kernel.
 //
 // active_pairs / pair_area_boosts must already be pre-filtered (below-threshold

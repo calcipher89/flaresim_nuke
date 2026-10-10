@@ -32,6 +32,12 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <cstdlib>
+#include <mutex>
+#include <string>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 // Export host-callable entry points from the shared library.  GCC/Clang need
 // default visibility; on Windows the build exports all symbols already
@@ -1123,6 +1129,65 @@ __global__ void ghost_kernel(
 // CPU launcher
 // ===========================================================================
 
+
+// ---------------------------------------------------------------------------
+// cuda_device_check — is there a usable CUDA GPU in this process?
+//
+// Checked once per Nuke session (the answer doesn't change while Nuke runs).
+// The message names the machine so a render wrangler can see which farm node
+// picked up the job.
+// ---------------------------------------------------------------------------
+static std::string host_name()
+{
+#ifdef _WIN32
+    const char* n = std::getenv("COMPUTERNAME");
+    return n ? n : "this machine";
+#else
+    char buf[256] = {0};
+    if (gethostname(buf, sizeof(buf) - 1) == 0 && buf[0]) return buf;
+    return "this machine";
+#endif
+}
+
+static std::string cuda_version_string(int v)
+{
+    return std::to_string(v / 1000) + "." + std::to_string((v % 1000) / 10);
+}
+
+bool cuda_device_check(std::string* out_error)
+{
+    static std::once_flag once;
+    static std::string error;
+    std::call_once(once, [] {
+        int device_count = 0;
+        cudaError_t ce = cudaGetDeviceCount(&device_count);
+        const std::string where = " (on " + host_name() + ")";
+        if (ce == cudaErrorInsufficientDriver) {
+            int drv = 0, rt = 0;
+            cudaDriverGetVersion(&drv);
+            cudaRuntimeGetVersion(&rt);
+            error = "FlareSim+: the NVIDIA driver is too old" + where +
+                    ". The driver supports CUDA " + cuda_version_string(drv) +
+                    ", FlareSim+ was built with CUDA " + cuda_version_string(rt) +
+                    ". Update the NVIDIA driver, or rebuild FlareSim+ with an "
+                    "older CUDA toolkit.";
+        } else if (ce == cudaErrorNoDevice || (ce == cudaSuccess && device_count == 0)) {
+            error = "FlareSim+ needs an NVIDIA GPU and none was found" + where +
+                    ". On the farm, send FlareSim+ renders to GPU machines.";
+        } else if (ce != cudaSuccess) {
+            error = std::string("FlareSim+: CUDA could not start") + where + " (" +
+                    cudaGetErrorString(ce) +
+                    "). Check that the NVIDIA driver is installed correctly.";
+        }
+        if (!error.empty()) {
+            fprintf(stderr, "%s\n", error.c_str());
+            cudaGetLastError();  // clear the sticky error
+        }
+    });
+    if (!error.empty() && out_error) *out_error = error;
+    return error.empty();
+}
+
 void launch_ghost_cuda(
     const LensSystem&               lens,
     const std::vector<GhostPair>&   active_pairs,
@@ -1161,42 +1226,9 @@ void launch_ghost_cuda(
                 n_surfs, MAX_SURFACES, MAX_SURFACES);
     }
 
-    // Friendly GPU availability check — diagnose common "no CUDA" situations
+    // Friendly GPU availability check: diagnose common "no CUDA" situations
     // before we hit a cryptic allocator error.
-    {
-        int device_count = 0;
-        cudaError_t ce = cudaGetDeviceCount(&device_count);
-        if (ce == cudaErrorInsufficientDriver) {
-            if (out_error) {
-                int drv = 0, rt = 0;
-                cudaDriverGetVersion(&drv);
-                cudaRuntimeGetVersion(&rt);
-                *out_error = "FlareSim: CUDA driver/runtime mismatch. "
-                             "Driver reports CUDA "
-                             + std::to_string(drv / 1000) + "."
-                             + std::to_string((drv % 1000) / 10)
-                             + ", plugin was built with CUDA "
-                             + std::to_string(rt / 1000) + "."
-                             + std::to_string((rt % 1000) / 10)
-                             + ". Please update your NVIDIA driver or "
-                               "rebuild the plugin with an older CUDA toolkit.";
-            }
-            return;
-        }
-        if (ce == cudaErrorNoDevice || device_count == 0) {
-            if (out_error)
-                *out_error = "FlareSim requires an NVIDIA CUDA GPU — no compatible GPU "
-                             "was detected on this system. FlareSim will produce black output.";
-            return;
-        }
-        if (ce != cudaSuccess) {
-            if (out_error)
-                *out_error = std::string("FlareSim: CUDA initialisation failed (")
-                             + cudaGetErrorString(ce)
-                             + "). Check that your NVIDIA driver is installed correctly.";
-            return;
-        }
-    }
+    if (!cuda_device_check(out_error)) return;
 
     // Clear any sticky error left by a previous frame's kernel.
     // Note: on Windows/WDDM, once the CUDA context is lost (e.g. from a GPU

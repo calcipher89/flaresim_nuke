@@ -165,6 +165,7 @@ The build handles these automatically:
 - **CUDA architectures** are chosen from the installed nvcc (12.8+ adds Blackwell sm_100/sm_120). Override with `-DCMAKE_CUDA_ARCHITECTURES="86;89"`.
 - **libstdc++ ABI**: Nuke 14 on Linux needs `_GLIBCXX_USE_CXX11_ABI=0` (per Foundry's NDK guide); it is set from `NUKE_VERSION`.
 - **CUDA runtime** is linked statically, so users need only an NVIDIA driver ≥ 525.
+- **Linux build for a studio**: see [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md).
 
 ### Building every Nuke version at once
 
@@ -189,12 +190,21 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ## Installation
 
-1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `FlareSim_Header.py`, `icons/`, `looks/` and `lenses/`.
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `FlareSim_Header.py`, `FlareSim_SelfTest.py`, `icons/`, `looks/` and `lenses/`.
 2. Add this to `~/.nuke/init.py`:
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
    ```
 3. Restart Nuke. The nodes appear under **Filter** as **FlareSim+** and **FlareSim+ 3D**. The **Lens Browser** button on each node, and **Window → FlareSim+ Lens Browser**, open the Lens Browser window on the bundled lens library.
+
+### Studio and farm deployment
+
+- **One shared install.** Put the `FlareSim` folder on a read-only share and add it with `nuke.pluginAddPath()` in the facility `init.py` (not only in a GUI `menu.py`), so terminal and farm renders find the nodes. Each Nuke major.minor version (15.0, 15.1, 16.0, ...) needs its own build.
+- **GPU.** Every machine that renders FlareSim+ needs an NVIDIA GPU (sm_70 or newer: Volta, Turing, Ampere, Ada, Hopper, Blackwell) and driver 525 or newer. Without one the node errors with a message naming the machine, so the render fails instead of writing frames without a flare. Send FlareSim+ farm jobs to GPU machines only.
+- **Studio lenses.** Put shared lenses in a folder on `FLARESIM_LENS_PATH` (`:`-separated on Linux and macOS, `;` on Windows). Lenses imported in the Lens Browser go to the artist's own `~/.nuke/FlareSim/lenses`, which other artists and the farm can't see.
+- **Lens paths in scripts.** When a script's lens path doesn't exist on this machine (a script from another OS, a moved install), the node looks for the same file in `FLARESIM_LENS_PATH`, the bundled `lenses` folder and `~/.nuke/FlareSim/lenses`, first by the path under `lenses/`, then by file name. If it can't find it, the node shows an error rather than rendering no flare.
+- **Shared looks.** Put studio looks in a folder on `FLARESIM_LOOKS_PATH`.
+- **Self-test.** Run `nuke -t /path/to/FlareSim/FlareSim_SelfTest.py` on a workstation and as a farm job (or **Help → FlareSim+ Self Test** in Nuke). It checks the GPU and driver, plugin loading, the lens library, writable folders and a test render, and writes a text report to your home folder. Add `--script shot.nk` to check a script's lens paths, and `--all` to render every lens. It exits with an error when a check fails.
 
 ---
 

@@ -22,6 +22,7 @@
 #include "DDImage/CameraOp.h"
 
 #include "lens.h"
+#include "lens_path.h"
 #include "occlusion.h"
 #include "node_ui.h"
 #include "ghost.h"
@@ -256,6 +257,7 @@ public:
     // ---- Runtime state ----
     LensSystem  lens_;
     std::string last_lens_file_;
+    std::string lens_error_;   // set when the lens file can't be found or read
 
     // Full enumerated pair list — updated when lens changes.
     std::vector<GhostPair> all_lens_pairs_;
@@ -976,16 +978,38 @@ public:
             // Reload lens interactively and rebuild pair UI immediately.
             const std::string path(lens_file_ ? lens_file_ : "");
             if (!path.empty() && path != last_lens_file_) {
-                if (lens_.load(path.c_str())) {
+                if (load_lens(path)) {
                     last_lens_file_ = path;
                     rebuild_surf_ui();  // also populates all_lens_pairs_
-                } else {
-                    fprintf(stderr, "FlareSim: failed to load lens: %s\n", path.c_str());
                 }
             }
             return 1;
         }
         return Iop::knob_changed(k);
+    }
+
+    // Loads the lens for `path`.  When the stored path doesn't exist on this
+    // machine (a script from Windows, a moved install, a lens imported in
+    // someone else's home folder) the lens folders are searched for the same
+    // file; see lens_path.h.  Sets lens_error_ when no lens can be loaded.
+    bool load_lens(const std::string& path)
+    {
+        lens_error_.clear();
+        const std::string found = flaresim::resolve_lens_path(path);
+        if (found.empty()) {
+            lens_error_ = "FlareSim+: lens file not found: " + path +
+                          ". Put the lens in a folder on FLARESIM_LENS_PATH, "
+                          "or pick it again in the Lens Browser.";
+        } else if (!lens_.load(found.c_str())) {
+            lens_error_ = "FlareSim+: could not read lens file: " + found;
+        } else {
+            if (found != path)
+                fprintf(stderr, "FlareSim+: lens %s not found, using %s\n",
+                        path.c_str(), found.c_str());
+            return true;
+        }
+        fprintf(stderr, "%s\n", lens_error_.c_str());
+        return false;
     }
 
     // ---- append (hash) ----
@@ -1027,14 +1051,18 @@ public:
         const std::string cur_lens(lens_file_ ? lens_file_ : "");
         if (cur_lens != last_lens_file_)
         {
+            lens_error_.clear();
             if (!cur_lens.empty())
             {
-                if (!lens_.load(cur_lens.c_str()))
-                    fprintf(stderr, "FlareSim: failed to load lens file: %s\n",
-                            cur_lens.c_str());
+                load_lens(cur_lens);
             }
             last_lens_file_ = cur_lens;
             rebuild_surf_ui();  // also populates all_lens_pairs_
+        }
+
+        if (!lens_error_.empty()) {
+            error("%s", lens_error_.c_str());
+            return;
         }
 
         {

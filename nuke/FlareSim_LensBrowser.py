@@ -2738,6 +2738,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         lens = knobs['lens_file'].value() if 'lens_file' in knobs else ''
         if lens:
             lens = nuke.filenameFilter(lens) if hasattr(nuke, 'filenameFilter') else lens
+            lens = FlareSim_Looks.resolve_lens(lens) or lens
         if lens and os.path.isfile(lens):
             self.set_lens(lens, surfaces)
         else:
