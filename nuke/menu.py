@@ -33,6 +33,14 @@ except Exception as e:
     nuke.warning(f'FlareSim: could not load the panel header: {e}')
 
 nuke.menu('Nuke').addCommand(
-    'Help/FlareSim+ Self Test',
+    'Help/FlareSim+/Self Test',
     'import FlareSim_SelfTest; FlareSim_SelfTest.run()',
+)
+nuke.menu('Nuke').addCommand(
+    'Help/FlareSim+/Debug Logging On or Off',
+    'import FlareSim_Log; FlareSim_Log.toggle_from_menu()',
+)
+nuke.menu('Nuke').addCommand(
+    'Help/FlareSim+/Save Debug Report',
+    'import FlareSim_Log; FlareSim_Log.report_from_menu()',
 )

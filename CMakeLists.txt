@@ -344,7 +344,7 @@ install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
 install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py nuke/FlareSim_Looks.py
-    nuke/FlareSim_Header.py nuke/FlareSim_SelfTest.py DESTINATION .)
+    nuke/FlareSim_Header.py nuke/FlareSim_SelfTest.py nuke/FlareSim_Log.py DESTINATION .)
 install(DIRECTORY nuke/icons/ DESTINATION icons
     FILES_MATCHING PATTERN "*.png")
 install(DIRECTORY looks/ DESTINATION looks

@@ -38,6 +38,7 @@ try:
 except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
+import FlareSim_Log as _log
 import FlareSim_Looks
 
 # QShortcut lives in QtWidgets in Qt 5 and in QtGui in Qt 6.
@@ -594,8 +595,8 @@ class PreviewRenderer(QtCore.QObject):
             done = serial
             try:
                 lens = self._serve(req, serial, lens)
-            except Exception as e:   # keep the thread alive for the next request
-                sys.stderr.write('FlareSim preview: %s\n' % e)
+            except Exception:   # keep the thread alive for the next request
+                _log.exception('preview', 'preview render')
 
     def _serve(self, req, serial, lens):
         """Draw one request.  Returns the lens now loaded."""
@@ -738,8 +739,8 @@ class ThumbnailRenderer(QtCore.QObject):
                             pass
                 if img is not None and not self._stop:
                     self.thumbReady.emit(path, img)
-            except Exception as e:   # one bad lens must not stop the rest
-                sys.stderr.write('FlareSim thumbnail %s: %s\n' % (path, e))
+            except Exception:   # one bad lens must not stop the rest
+                _log.exception('preview', 'thumbnail %s', path)
 
 
 # ---------------------------------------------------------------------------
@@ -2451,6 +2452,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if not lines:
             lines.append('No .lens files found.')
         nuke.tprint('FlareSim: ' + ' '.join(l.strip() for l in lines))
+        _log.info('browser', 'import lens: %s', ' '.join(l.strip() for l in lines))
         if not quiet:
             box = QtWidgets.QMessageBox.warning if failed and not imported else \
                 QtWidgets.QMessageBox.information
@@ -2584,6 +2586,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if self._look_name.lower() == look['name'].lower():
             self._look_name = ''
         nuke.tprint('FlareSim: deleted look %s' % look['_path'])
+        _log.info('browser', 'deleted look %s', look['_path'])
         self._refresh_looks()
 
     def _load_look(self):
@@ -2672,6 +2675,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._look_name = look['name']
         self._refresh_looks(select_name=look['name'])
         nuke.tprint('FlareSim: saved look to %s' % path)
+        _log.info('browser', 'saved look %s', path)
 
     def _default_look_name(self):
         info = self._lens_info()
@@ -2821,6 +2825,10 @@ class LensBrowserWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, 'FlareSim', '\n'.join(warnings))
         nuke.tprint('FlareSim: applied %s to %s' % (
             os.path.basename(self._lens_path), ', '.join(n.name() for n in nodes)))
+        _log.info('browser', 'applied %s (look %r, all surfaces %s) to %s%s',
+                  self._lens_path, self._look_name, all_surfaces,
+                  ', '.join(n.fullName() for n in nodes),
+                  ('; warnings: ' + '; '.join(warnings)) if warnings else '')
 
     def _update_node_headers(self, nodes, look_name=None):
         """After Apply to Node: record the look's name (None keeps the
@@ -2835,8 +2843,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
                     n['look_name'].setValue(look_name)
                 FlareSim_Header.save_look_thumbnail(n, self.view.image)
                 FlareSim_Header.refresh(n)
-            except Exception as e:
-                sys.stderr.write('FlareSim header: %s\n' % e)
+            except Exception:
+                _log.exception('header', 'updating the header of %s', n.name())
 
     # -- preview --------------------------------------------------------
 
