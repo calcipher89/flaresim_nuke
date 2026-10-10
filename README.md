@@ -18,6 +18,12 @@ The node opens with just the main controls: Lens Browser, Source, Matte, **Quali
 
 - **Quality** — **Low**, **Medium** (default), **High**, **Ultra** or **Custom**. The presets follow the image width, about 128, 256, 512 and 1024 rays across on a 1920 plate, so a look renders the same at any resolution. Each step up takes about four times as long. **Custom** shows **Ray Grid** to set it yourself. Scripts saved with their own Ray Grid open as Custom and keep it; scripts on the old default (64) now render at Medium. Looks no longer set the ray grid.
 
+### Camera Input (FlareSim)
+
+2D FlareSim has an optional **cam** input. Connect the shot camera and the field of view comes from its focal length and horizontal aperture (the vertical follows the format's aspect, as Nuke's own renders do), including any animation, instead of the FOV knobs. With nothing connected the FOV knobs work as before.
+
+The Lens Browser reads the same camera (input 1 on FlareSim3D): **Focal** gets a **Near camera** entry that lists lenses within 15% of the camera's focal length, or the closest few if none are that close. It is picked for you when the node has no lens yet or its lens is already one of them; otherwise it stays one click away. Without a camera, **Use Sensor Size** with a Focal Length on the node works too.
+
 ### Overscan (Clip To)
 
 For an undistort → FlareSim → redistort workflow. **Clip To** in the Output section sets the area the flare is rendered into:
@@ -191,7 +197,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 **FlareSim** (2D source):
 1. Connect your plate to the input.
 2. Click **Lens Browser** on the node to pick a lens with a live preview. The button shows the node's current lens.
-3. Tick **Show Advanced** and set **FOV H** to match your camera.
+3. Connect your shot camera to the **cam** input so the flare uses its focal length and film back. Without one, tick **Show Advanced** and set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.
    - Adjust **Threshold** until only the lights you want are marked.
@@ -214,7 +220,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim Lens Browser**) opens a window for picking a lens and building a look before you render:
 
-- **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
+- **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length (including **Near camera** when the node has a camera) and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
 - **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it. Exposure, the preview light and the quality are remembered between sessions; **Reset** next to Exposure and **Reset Preview Light** put them back to their defaults.
 - **Look** tab:
   - **Flare Look**: Gain, aperture Blades and Rotation, Ghost Blur. These are the node's knobs.
