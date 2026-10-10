@@ -73,6 +73,9 @@ def lens_path(node):
     path = _knob(node, 'lens_file', '') or ''
     if path and hasattr(nuke, 'filenameFilter'):
         path = nuke.filenameFilter(path)
+    if path and not os.path.isfile(path):
+        import FlareSim_Looks
+        path = FlareSim_Looks.resolve_lens(path) or path
     return path.replace('\\', '/')
 
 

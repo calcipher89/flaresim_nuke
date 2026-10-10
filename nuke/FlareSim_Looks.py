@@ -28,6 +28,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_LOOKS_DIR = os.path.join(_HERE, 'looks')
 BUNDLED_LENS_ROOT = os.path.join(_HERE, 'lenses')
 USER_LOOKS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'looks')
+USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lenses')
 
 # Knobs a look stores.  Shot-specific knobs (source mode, Source XY,
 # threshold, camera/FOV, seeds) are deliberately left out.
@@ -121,20 +122,72 @@ def lens_to_look(path):
     return path.replace('\\', '/')
 
 
+def lens_search_roots():
+    """Lens folders on this machine, in the order the node searches them:
+    FLARESIM_LENS_PATH, the bundled library, then imported lenses."""
+    roots = [d.strip() for d in os.environ.get('FLARESIM_LENS_PATH', '').split(os.pathsep)
+             if d.strip()]
+    roots.append(BUNDLED_LENS_ROOT)
+    roots.append(USER_LENS_DIR)
+    return roots
+
+
+def _find_by_name(root, name, ignore_case):
+    want = name.lower() if ignore_case else name
+    for folder, _dirs, files in os.walk(root):
+        for f in files:
+            if (f.lower() if ignore_case else f) == want:
+                return os.path.join(folder, f).replace('\\', '/')
+    return ''
+
+
+_resolved = {}
+
+
 def resolve_lens(value):
-    """Turn a look's lens entry into a path on this machine, or '' if missing."""
+    """Turn a stored lens path (a node's lens_file or a look's lens entry)
+    into a path on this machine, or '' if missing.
+
+    Same search as the node (src/lens_path.cpp), so scripts from Windows,
+    moved installs and lenses imported on another machine still find the
+    lens when the same file is in one of lens_search_roots()."""
     if not value:
         return ''
-    if os.path.isabs(value) and os.path.isfile(value):
+    if os.path.isfile(value):
         return value.replace('\\', '/')
-    candidate = os.path.join(BUNDLED_LENS_ROOT, value)
-    if os.path.isfile(candidate):
-        return candidate.replace('\\', '/')
-    # Fall back to a file of the same name anywhere in the bundled library.
-    name = os.path.basename(value.replace('\\', '/'))
-    for folder, _dirs, files in os.walk(BUNDLED_LENS_ROOT):
-        if name in files:
-            return os.path.join(folder, name).replace('\\', '/')
+    hit = _resolved.get(value)
+    if hit and os.path.isfile(hit):
+        return hit
+    found = _search_lens(value)
+    if found:
+        _resolved[value] = found
+    return found
+
+
+def _search_lens(value):
+    norm = value.replace('\\', '/')
+    roots = lens_search_roots()
+    pos = norm.lower().rfind('/lenses/')
+    if pos >= 0:
+        tail = norm[pos + len('/lenses/'):]
+        for root in roots:
+            candidate = os.path.join(root, tail)
+            if os.path.isfile(candidate):
+                return candidate.replace('\\', '/')
+    if not os.path.isabs(norm) and ':' not in norm:
+        for root in roots:
+            candidate = os.path.join(root, norm)
+            if os.path.isfile(candidate):
+                return candidate.replace('\\', '/')
+    name = norm.rsplit('/', 1)[-1]
+    if not name:
+        return ''
+    for ignore_case in (False, True):
+        for root in roots:
+            if os.path.isdir(root):
+                found = _find_by_name(root, name, ignore_case)
+                if found:
+                    return found
     return ''
 
 

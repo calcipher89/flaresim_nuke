@@ -75,6 +75,7 @@ set(FLARESIM_CORE_SOURCES
     src/lens.cpp
     src/trace.cpp
     src/ghost.cpp
+    src/lens_path.cpp
 )
 
 # ===========================================================================
@@ -84,7 +85,7 @@ add_library(flaresim_preview SHARED src/preview.cpp ${FLARESIM_CORE_SOURCES})
 target_include_directories(flaresim_preview PRIVATE src)
 target_compile_definitions(flaresim_preview PRIVATE FLARESIM_PREVIEW_BUILD)
 find_package(Threads REQUIRED)
-target_link_libraries(flaresim_preview PRIVATE Threads::Threads)
+target_link_libraries(flaresim_preview PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(flaresim_preview PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON)
@@ -110,6 +111,11 @@ if(FLARESIM_BUILD_TESTS)
         target_compile_options(flaresim_smoke PRIVATE -Wall -Wno-deprecated-declarations)
     endif()
     add_test(NAME optics_smoke COMMAND flaresim_smoke)
+
+    add_executable(flaresim_lens_path_test src/lens_path_test.cpp src/lens_path.cpp)
+    target_include_directories(flaresim_lens_path_test PRIVATE src)
+    target_link_libraries(flaresim_lens_path_test PRIVATE ${CMAKE_DL_LIBS})
+    add_test(NAME lens_path COMMAND flaresim_lens_path_test)
 
     add_executable(flaresim_preview_test src/preview_test.cpp)
     target_include_directories(flaresim_preview_test PRIVATE src)
@@ -211,7 +217,7 @@ if(APPLE)
     foreach(_tgt ${FLARESIM_TARGETS})
         add_dependencies(${_tgt} embedded_metallib)
         target_include_directories(${_tgt} PRIVATE src src/metal "${NDK_ROOT}")
-        target_link_libraries(${_tgt} PRIVATE "${_ddimage_lib}" ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+        target_link_libraries(${_tgt} PRIVATE "${_ddimage_lib}" ${CMAKE_DL_LIBS} ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
         target_compile_options(${_tgt} PRIVATE
             -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations
             -fvisibility=hidden -O3)
@@ -293,7 +299,7 @@ else()
 
     foreach(_tgt ${FLARESIM_TARGETS})
         target_include_directories(${_tgt} PRIVATE src "${NDK_ROOT}")
-        target_link_libraries(${_tgt} PRIVATE "${_ddimage_lib}")
+        target_link_libraries(${_tgt} PRIVATE "${_ddimage_lib}" ${CMAKE_DL_LIBS})
 
         if(WIN32)
             if(EXISTS "${NUKE_LIB_DIR}/Ndk.lib")
@@ -338,7 +344,7 @@ install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
 install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py nuke/FlareSim_Looks.py
-    nuke/FlareSim_Header.py DESTINATION .)
+    nuke/FlareSim_Header.py nuke/FlareSim_SelfTest.py DESTINATION .)
 install(DIRECTORY nuke/icons/ DESTINATION icons
     FILES_MATCHING PATTERN "*.png")
 install(DIRECTORY looks/ DESTINATION looks
