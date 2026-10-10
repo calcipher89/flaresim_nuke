@@ -15,8 +15,9 @@ while the panel is open is also pushed to the panel's label.
 Once a panel is open, the header is redrawn to the panel's width when the
 panel is resized (the wordmark stays centred and the lens card stretches),
 section titles get a spectral tick, and a floating panel is sized to the
-tab you're on rather than its tallest tab.  Header images
-are cached, so a script with many FlareSim nodes draws each header once.
+tab you're on rather than its tallest tab.  See "Panel styling" below,
+including how to turn it off.  Header images are cached, so a script with
+many FlareSim nodes draws each header once.
 The look thumbnail is the Lens Browser's preview, saved on
 Apply to Node; until there is one, the lens thumbnail from the browser's
 cache is used.
@@ -288,7 +289,7 @@ def refresh(node):
     if node is None or 'header' not in node.knobs() or not _qt_ready():
         return
     try:
-        width = _widths.get(node.fullName(), SIZE[0])
+        width = _widths.get(node.fullName(), SIZE[0]) if panel_styling() else SIZE[0]
         path = header_image(header_info(node), width).replace('\\', '/')
         html = '<img src="%s" width="%d" height="%d">%s' % (
             path, width, SIZE[1], _node_tag(node))
@@ -307,18 +308,14 @@ def _node_tag(node):
 
 
 def _update_open_panels(node, old, html):
-    """Show a new header in panels that are already open.  Nuke builds a
-    Text knob's label when the panel opens and doesn't redraw it on
-    setValue, so find the labels still showing the old header."""
-    src = re.search(r'src="[^"]*"', old or '')
-    if not src:
+    """Show a new header in the node's open panel.  Nuke builds a Text
+    knob's label when the panel opens and doesn't redraw it on setValue."""
+    if not panel_styling():
         return
-    labels = [w for w in QtWidgets.QApplication.allWidgets()
-              if isinstance(w, QtWidgets.QLabel) and src.group(0) in w.text()]
-    tag = _node_tag(node)
-    tagged = [w for w in labels if tag in w.text()]
-    for w in (tagged or labels):
-        w.setText(html)
+    styler = _stylers.get(node.fullName())
+    label = styler.header_label() if styler is not None else None
+    for l in [label] if label is not None else _find_header_labels(node):
+        l.setText(html)
 
 
 def tick_image():
@@ -343,6 +340,59 @@ def tick_image():
     return path.replace('\\', '/')
 
 
+# ---------------------------------------------------------------------------
+# Panel styling
+# ---------------------------------------------------------------------------
+# Nuke has no API for styling a plugin's panel, so this works on the Qt
+# widgets Nuke builds for it.  Nuke can rebuild them (showing or hiding
+# knobs, reloading a lens), so each open panel gets a _PanelStyler that
+# re-applies the styling when that happens.  Everything is scoped to open
+# FlareSim panels; nothing runs for the node graph or other nodes.
+#
+# To turn it off (Nuke's plain panel; the header still shows, at a fixed
+# size, and updates the next time the panel opens), either set
+#     os.environ['FLARESIM_PANEL_STYLE'] = '0'
+# in init.py, or put
+#     FlareSim_Header.PANEL_STYLE = False
+# in menu.py after the FlareSim import.
+
+PANEL_STYLE = os.environ.get('FLARESIM_PANEL_STYLE', '1').strip().lower() \
+    not in ('0', 'false', 'off', 'no')
+_stylers = {}     # node full name -> _PanelStyler for its open panel
+RETRY_MS = (0, 60, 200, 600)   # styling attempts after the panel opens
+
+
+def panel_styling():
+    return bool(PANEL_STYLE) and _qt_ready()
+
+
+def _alive(w):
+    """False once Qt has deleted the widget behind a Python wrapper."""
+    if w is None:
+        return False
+    try:
+        w.objectName()
+        return True
+    except RuntimeError:
+        return False
+
+
+def _find_header_labels(node):
+    """The QLabels showing a node's header (normally one).  Searches labels
+    only, in visible windows, and only when the node has no styler yet (its
+    panel just opened)."""
+    found = []
+    tag = _node_tag(node)
+    for top in QtWidgets.QApplication.topLevelWidgets():
+        if not top.isVisible():
+            continue
+        labels = top.findChildren(QtWidgets.QLabel)
+        if isinstance(top, QtWidgets.QLabel):
+            labels.append(top)
+        found.extend(l for l in labels if tag in l.text())
+    return found
+
+
 def _panel_of(label):
     """The widget holding a node's knobs: the nearest parent of the header
     label that also holds the section titles."""
@@ -350,139 +400,160 @@ def _panel_of(label):
     for _ in range(10):
         if w is None:
             return None
-        names = set(l.text().strip() for l in w.findChildren(QtWidgets.QLabel))
+        names = set(_plain(l.text()) for l in w.findChildren(QtWidgets.QLabel))
         if len(names.intersection(SECTION_TITLES)) >= 2:
             return w
         w = w.parentWidget()
     return None
 
 
-def _header_labels(node):
-    tag = _node_tag(node)
-    return [w for w in QtWidgets.QApplication.allWidgets()
-            if isinstance(w, QtWidgets.QLabel) and tag in w.text()]
+def _plain(text):
+    """A label's text without the tick (titles already styled)."""
+    return re.sub(r'<[^>]*>|&nbsp;', '', text or '').strip()
 
 
-def style_panel(node):
-    """Fit the header to the node's open panel, put a spectral tick before
-    each section title and size a floating panel to its tab.  Nuke builds
-    the panel's widgets after the showPanel callback, so this runs once the
-    event loop is back."""
-    for hl in _header_labels(node):
-        # The header image sets its width, not the label: let the panel
-        # shrink, and redraw the header to fit.
-        hl.setMinimumWidth(1)
-        panel = _panel_of(hl)
-        if panel is None:
-            continue
-        _style_titles(panel)
-        _HeaderFitter.attach(node, hl, panel)
-        _fit_tabs(panel)
+def _tick_html():
+    return '<img src="%s" width="%d" height="%d" style="vertical-align: middle">' \
+           '&nbsp;&nbsp;' % ((tick_image(),) + TICK_SIZE)
 
 
 def _style_titles(panel):
     """A spectral tick before each section title.  Nuke right-aligns divider
     titles to the label column, so the titles are given one width and
-    left-aligned, which lines the ticks up."""
-    tick = '<img src="%s" width="%d" height="%d" style="vertical-align: middle">' \
-           '&nbsp;&nbsp;' % ((tick_image(),) + TICK_SIZE)
+    left-aligned, which lines the ticks up.  Titles already styled are left
+    alone, so running this again changes nothing."""
+    tick = _tick_html()
     titles = []
     for l in panel.findChildren(QtWidgets.QLabel):
-        text = l.text().strip()
-        if text in SECTION_TITLES:
-            l.setTextFormat(QtCore.Qt.RichText)
-            l.setText(tick + text)
+        text = l.text()
+        if text.startswith(tick):
             titles.append(l)
-        elif text.startswith(tick):
+        elif text.strip() in SECTION_TITLES:
+            l.setTextFormat(QtCore.Qt.RichText)
+            l.setText(tick + text.strip())
             titles.append(l)
     if not titles:
-        return
+        return 0
     width = max(l.sizeHint().width() for l in titles)
     for l in titles:
-        l.setMinimumWidth(width)
-        l.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        if l.minimumWidth() != width:
+            l.setMinimumWidth(width)
+        if l.alignment() != (QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter):
+            l.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+    return len(titles)
 
 
-class _HeaderFitter(QtCore.QObject):
-    """Redraws a node's header to its panel's width when the panel is shown
-    or resized.  The redraw waits for resizing to pause."""
-
-    def __init__(self, node, label, panel):
-        super(_HeaderFitter, self).__init__(panel)
-        self._name = node.fullName()
-        self._label = label
-        self._panel = panel
-        self._timer = QtCore.QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.fit)
-        panel.installEventFilter(self)
-
-    @classmethod
-    def attach(cls, node, label, panel):
-        fitter = panel.property('flaresim_header_fitter')
-        if not isinstance(fitter, _HeaderFitter):
-            fitter = cls(node, label, panel)
-            panel.setProperty('flaresim_header_fitter', fitter)
-        fitter._label = label
-        fitter.fit()
-        return fitter
-
-    def eventFilter(self, obj, event):
-        if obj is self._panel and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Show):
-            self._timer.start()
-        return False
-
-    def width(self):
-        """The header width that leaves the same margin on both sides."""
-        try:
-            left = self._label.mapTo(self._panel, QtCore.QPoint(0, 0)).x()
-        except RuntimeError:       # the label was deleted with its panel
-            return 0
-        return max(MIN_WIDTH, (self._panel.width() - 2 * max(left, 0)) // 4 * 4)
-
-    def fit(self):
-        w = self.width()
-        if not w or _widths.get(self._name) == w:
-            return
-        _widths[self._name] = w
-        node = nuke.toNode(self._name)
-        if node is not None:
-            refresh(node)
-
-
-def _fit_tabs(panel):
-    """Size a floating panel to the tab on show rather than to its tallest
-    tab.  A docked panel fills its pane whatever its size, so it is left
-    alone."""
+def _scroll_viewport(panel):
     w = panel
-    stack = None
+    while w is not None:
+        if isinstance(w, QtWidgets.QAbstractScrollArea):
+            return w.viewport()
+        w = w.parentWidget()
+    return None
+
+
+def _stack_of(panel):
+    w = panel
     while w is not None:
         parent = w.parentWidget()
         if isinstance(parent, QtWidgets.QStackedWidget):
-            stack = parent
-            break
+            return parent
         w = parent
-    if stack is None:
-        return
+    return None
 
-    def apply(_index=None):
-        win = stack.window()
-        if win is None or isinstance(win, QtWidgets.QMainWindow) or win.isMaximized():
-            return
-        QtCore.QTimer.singleShot(0, fit)
 
-    def fit():
-        """Make the window as tall as the tab's knobs: what's around them
-        (title bar, tabs, buttons) stays, the knob area fits its content."""
-        try:
-            win = stack.window()
-            current = stack.currentWidget()
-        except RuntimeError:       # the panel was closed
+class _PanelStyler(QtCore.QObject):
+    """Styles one node's open panel and keeps it styled: re-applies the
+    ticks when Nuke rebuilds the knobs, redraws the header to the width of
+    the knob area when it changes (the panel resized or its divider
+    dragged), and sizes a floating panel to its tab.  Lives as a child of
+    the panel, so it goes when the panel closes."""
+
+    def __init__(self, node, label, panel):
+        super(_PanelStyler, self).__init__(panel)
+        self._name = node.fullName()
+        self._label = label
+        self._panel = panel
+        self._viewport = _scroll_viewport(panel)
+        self._stack = _stack_of(panel)
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self.restyle)
+        panel.installEventFilter(self)
+        if self._viewport is not None:
+            self._viewport.installEventFilter(self)
+        if self._stack is not None:
+            self._stack.currentChanged.connect(self._fit_later)
+        panel.destroyed.connect(self._forget)
+
+    def _forget(self, *_args):
+        if _stylers.get(self._name) is self:
+            del _stylers[self._name]
+
+    def alive(self):
+        return _alive(self._panel)
+
+    def header_label(self):
+        """The header label, found again inside this panel if Nuke rebuilt
+        it."""
+        if _alive(self._label):
+            return self._label
+        tag = '<!--flaresim:%s-->' % self._name
+        for l in self._panel.findChildren(QtWidgets.QLabel):
+            if tag in l.text():
+                self._label = l
+                return l
+        self._label = None
+        return None
+
+    def eventFilter(self, obj, event):
+        t = event.type()
+        if t in (QtCore.QEvent.Resize, QtCore.QEvent.Show, QtCore.QEvent.ChildAdded,
+                 QtCore.QEvent.LayoutRequest):
+            self._timer.start()          # coalesces bursts of events
+        return False
+
+    def restyle(self, fit_window=False):
+        """Re-apply the styling; changes nothing that is already right.
+        The window is only fitted when the panel opens, its tab changes or
+        Show Advanced is toggled, so a window you resize by hand stays."""
+        if not panel_styling() or not self.alive():
             return
-        if win is None or current is None:
+        _style_titles(self._panel)
+        label = self.header_label()
+        if label is not None:
+            if label.minimumWidth() != 1:
+                label.setMinimumWidth(1)   # let the panel shrink; the header follows
+            self._fit_header(label)
+        if fit_window:
+            self._fit_later()
+
+    def _fit_header(self, label):
+        area = self._viewport if _alive(self._viewport) else self._panel
+        left = label.mapTo(area, QtCore.QPoint(0, 0)).x() if area.isAncestorOf(label) else 0
+        w = max(MIN_WIDTH, (area.width() - 2 * max(left, 0)) // 4 * 4)
+        if _widths.get(self._name) != w:
+            _widths[self._name] = w
+            node = nuke.toNode(self._name)
+            if node is not None:
+                refresh(node)
+
+    def _fit_later(self, *_args):
+        QtCore.QTimer.singleShot(0, self._fit_window)
+
+    def _fit_window(self):
+        """Make a floating window as tall as the tab's knobs.  A docked
+        panel fills its pane whatever its size, so it's left alone."""
+        if not self.alive() or self._stack is None or not _alive(self._stack):
             return
-        content = panel if (current is panel or current.isAncestorOf(panel)) else current
+        win = self._stack.window()
+        current = self._stack.currentWidget()
+        if win is None or current is None or isinstance(win, QtWidgets.QMainWindow) \
+                or win.isMaximized():
+            return
+        p = self._panel
+        content = p if (current is p or current.isAncestorOf(p)) else current
         need = win.height() - content.height() + content.sizeHint().height()
         try:
             need = min(need, win.screen().availableGeometry().height())
@@ -491,26 +562,52 @@ def _fit_tabs(panel):
         if need > 0 and abs(need - win.height()) > 4:
             win.resize(win.width(), need)
 
-    if not stack.property('flaresim_fit_tabs'):
-        stack.setProperty('flaresim_fit_tabs', True)
-        stack.currentChanged.connect(apply)
-    apply()
+
+def style_panel(node):
+    """Style the node's open panel.  Returns True once it is styled."""
+    if not panel_styling():
+        return False
+    name = node.fullName()
+    styler = _stylers.get(name)
+    if styler is None or not styler.alive():
+        label = panel = None
+        for l in _find_header_labels(node):
+            panel = _panel_of(l)
+            if panel is not None:
+                label = l
+                break
+        if panel is None:
+            return False             # not built yet; a later attempt will
+        styler = _PanelStyler(node, label, panel)
+        _stylers[name] = styler
+    styler.restyle(fit_window=True)
+    return True
 
 
 def _style_later(node):
+    """Style the panel once Nuke has built it.  Nuke builds the widgets
+    after the showPanel callback, and not always by the next event loop
+    turn, so this tries a few times and stops at the first success."""
+    if not panel_styling():
+        return
     try:
         name = node.fullName()
     except Exception:
         return
+    state = {'done': False}
 
-    def run():
+    def attempt():
+        if state['done']:
+            return
         try:
             n = nuke.toNode(name)
-            if n is not None:
-                style_panel(n)
+            if n is not None and style_panel(n):
+                state['done'] = True
         except Exception as e:
+            state['done'] = True
             sys.stderr.write('FlareSim header: %s\n' % e)
-    QtCore.QTimer.singleShot(0, run)
+    for ms in RETRY_MS:
+        QtCore.QTimer.singleShot(ms, attempt)
 
 
 def _on_create():
@@ -523,7 +620,8 @@ def _on_knob_changed():
         return
     if k.name() in TRIGGER_KNOBS:
         refresh(nuke.thisNode())
-    # Show Advanced reveals more section titles.
+    # Show Advanced reveals more section titles; the styler also catches
+    # this, the explicit call covers a panel Nuke rebuilt from scratch.
     if k.name() in ('showPanel', 'show_advanced'):
         _style_later(nuke.thisNode())
 

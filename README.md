@@ -16,6 +16,8 @@ The original FlareSim is a Windows/Nuke 16 plugin built on CUDA 13. This fork ad
 
 The FlareSim tab opens with a FlareSim+ header: the wordmark with its spectral line, and a card for the node's lens showing a small render of its look, the lens name, the look name, and the focal length (the connected camera's, or the lens's own with its f-stop). It updates when the panel opens and when the lens, the look or the inputs change. The look thumbnail is the Lens Browser's preview, saved when you click **Apply to Node**; headers are cached in `~/.nuke/FlareSim/headers`. The header stretches to the panel's width, section titles carry a matching spectral tick, and a floating panel is sized to the tab you're on.
 
+That styling works on Nuke's own panel widgets, only while a FlareSim panel is open. If it ever causes trouble, turn it off with `os.environ['FLARESIM_PANEL_STYLE'] = '0'` in `init.py` (or `FlareSim_Header.PANEL_STYLE = False` in `menu.py`): you get Nuke's plain panel, and the header still shows at a fixed size and updates the next time the panel opens.
+
 The new name is only what you see in the panel, the **Nodes** menu and the Lens Browser. The node classes are still `FlareSim` and `FlareSim3D`, so existing scripts and looks open as before.
 
 ### Simpler Node Panel
