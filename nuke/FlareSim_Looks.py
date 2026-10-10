@@ -192,6 +192,57 @@ def _search_lens(value):
 
 
 # ---------------------------------------------------------------------------
+# Camera input
+# ---------------------------------------------------------------------------
+
+# The input a Camera connects to, per node class.
+CAMERA_INPUT = {'FlareSim': 2, 'FlareSim3D': 1}
+# Nodes that only pass their input on; followed to the node behind them.
+PASSTHROUGH_CLASSES = ('Dot', 'NoOp')
+
+
+def upstream(node, index):
+    """The node on input `index`, followed through Dot and NoOp nodes."""
+    n = node.input(index)
+    for _ in range(64):
+        if n is None or n.Class() not in PASSTHROUGH_CLASSES:
+            return n
+        n = n.input(0)
+    return None
+
+
+def camera_node(node):
+    """The Camera the node takes its field of view from, or None (no camera
+    connected, or Use Camera turned off)."""
+    try:
+        index = CAMERA_INPUT.get(node.Class())
+        if index is None:
+            return None
+        knobs = node.knobs()
+        if 'use_camera' in knobs and not knobs['use_camera'].value():
+            return None
+        cam = upstream(node, index)
+        return cam if cam is not None and 'focal' in cam.knobs() else None
+    except Exception:
+        return None
+
+
+def camera_values(node):
+    """(camera name, focal, horizontal aperture, vertical aperture) in mm
+    at the current frame, or None."""
+    cam = camera_node(node)
+    if cam is None:
+        return None
+    try:
+        k = cam.knobs()
+        hap = float(k['haperture'].value()) if 'haperture' in k else 0.0
+        vap = float(k['vaperture'].value()) if 'vaperture' in k else 0.0
+        return cam.name(), float(k['focal'].value()), hap, vap
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Finding looks
 # ---------------------------------------------------------------------------
 

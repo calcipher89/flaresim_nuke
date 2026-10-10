@@ -8,9 +8,11 @@
 #include "DDImage/Format.h"
 #include "DDImage/Knob.h"
 #include "DDImage/Knobs.h"
+#include "DDImage/Op.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 namespace flaresim {
@@ -87,5 +89,35 @@ struct AdvancedKnobs
             k->visible(on);
     }
 };
+
+// ---- Inputs through Dot and NoOp nodes ----
+// A Dot or NoOp only passes its input on, so artists put them in camera and
+// axis pipes to tidy the node graph.  These follow such a chain to the op
+// behind it.
+
+inline bool is_passthrough(const DD::Image::Op* op)
+{
+    const char* cls = op ? op->Class() : nullptr;
+    return cls && (std::strcmp(cls, "Dot") == 0 || std::strcmp(cls, "NoOp") == 0);
+}
+
+// The T (CameraOp, AxisOp, ...) at op, or behind a chain of Dots and NoOps.
+template <typename T>
+inline T* through_passthrough(DD::Image::Op* op)
+{
+    for (int i = 0; op && i < 64; ++i) {
+        if (T* t = dynamic_cast<T*>(op)) return t;
+        if (!is_passthrough(op) || op->inputs() < 1) return nullptr;
+        op = op->input(0);
+    }
+    return nullptr;
+}
+
+// For test_input(): a T, or a Dot/NoOp that may lead to one.
+template <typename T>
+inline bool accepts_through_passthrough(DD::Image::Op* op)
+{
+    return dynamic_cast<T*>(op) != nullptr || is_passthrough(op);
+}
 
 } // namespace flaresim
