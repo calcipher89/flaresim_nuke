@@ -5,7 +5,6 @@
   "lens": "lens_files/Zhong_Yi_50mm_F0.95_(Zhong_Yi_SpeedMaster_50mm_F0.95_M).lens",
   "knobs": {
     "flare_gain": 12.0,
-    "ray_grid": 64,
     "pupil_jitter": 0,
     "aperture_blades": 0,
     "aperture_rotation": 0.0,
