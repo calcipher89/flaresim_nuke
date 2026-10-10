@@ -10,7 +10,12 @@ under ~/.nuke/FlareSim/headers and shown by the node's "header" Text knob.
 It is set when a node is created or loaded, so it is there the first time
 the panel opens, and redrawn when the lens, the look or the inputs change.
 Nuke draws a Text knob's text once, when the panel is built, so a change
-while the panel is open is also pushed to the panel's label.  Header images
+while the panel is open is also pushed to the panel's label.
+
+Once a panel is open, the header is redrawn to the panel's width when the
+panel is resized (the wordmark stays centred and the lens card stretches),
+section titles get a spectral tick, and a floating panel is sized to the
+tab you're on rather than its tallest tab.  Header images
 are cached, so a script with many FlareSim nodes draws each header once.
 The look thumbnail is the Lens Browser's preview, saved on
 Apply to Node; until there is one, the lens thumbnail from the browser's
@@ -37,8 +42,11 @@ LOOK_THUMB_DIR = os.path.join(HEADER_DIR, 'looks')
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icons')
 WORDMARK = os.path.join(ICON_DIR, 'flaresim_plus_wordmark.png')
 
-# Header layout, in logical pixels.
+# Header layout, in logical pixels.  The width follows the panel; SIZE is
+# the width used before the panel is open, and MIN_WIDTH the narrowest.
 SIZE = (380, 128)
+MIN_WIDTH = 300
+_widths = {}      # node full name -> header width in its open panel
 THUMB_RECT = (16, 62, 108, 56)
 TRIGGER_KNOBS = ('showPanel', 'lens_file', 'look_name', 'inputChange')
 
@@ -172,9 +180,10 @@ def _elide(painter, text, width):
     return painter.fontMetrics().elidedText(text, QtCore.Qt.ElideRight, int(width))
 
 
-def draw_header(info, scale=1):
-    """Draw the header as a QImage at `scale` x the logical size."""
-    w, h = SIZE
+def draw_header(info, scale=1, width=None):
+    """Draw the header as a QImage at `scale` x the logical size, `width`
+    logical pixels wide (SIZE by default)."""
+    w, h = max(int(width or SIZE[0]), MIN_WIDTH), SIZE[1]
     img = QtGui.QImage(w * scale, h * scale, QtGui.QImage.Format_ARGB32_Premultiplied)
     img.fill(QtCore.Qt.transparent)
     p = QtGui.QPainter(img)
@@ -254,8 +263,9 @@ def draw_header(info, scale=1):
     return img
 
 
-def header_image(info):
-    """Path of the header PNG for `info`, drawn on first use."""
+def header_image(info, width=None):
+    """Path of the header PNG for `info` at `width`, drawn on first use."""
+    width = max(int(width or SIZE[0]), MIN_WIDTH)
     stamp = ''
     if info['thumb']:
         try:
@@ -263,13 +273,13 @@ def header_image(info):
             stamp = '%d:%d' % (int(st.st_mtime), st.st_size)
         except OSError:
             pass
-    key = json.dumps([HEADER_VERSION, info, stamp, SIZE], sort_keys=True)
+    key = json.dumps([HEADER_VERSION, info, stamp, width, SIZE[1]], sort_keys=True)
     digest = hashlib.sha1(key.encode('utf-8')).hexdigest()
     path = os.path.join(HEADER_DIR, digest[:2], digest + '.png')
     if not os.path.isfile(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        draw_header(info, 2).save(path[:-4] + '@2x.png')
-        draw_header(info, 1).save(path)
+        draw_header(info, 2, width).save(path[:-4] + '@2x.png')
+        draw_header(info, 1, width).save(path)
     return path
 
 
@@ -278,9 +288,10 @@ def refresh(node):
     if node is None or 'header' not in node.knobs() or not _qt_ready():
         return
     try:
-        path = header_image(header_info(node)).replace('\\', '/')
-        html = '<div align="center"><img src="%s" width="%d" height="%d"></div>%s' % (
-            path, SIZE[0], SIZE[1], _node_tag(node))
+        width = _widths.get(node.fullName(), SIZE[0])
+        path = header_image(header_info(node), width).replace('\\', '/')
+        html = '<img src="%s" width="%d" height="%d">%s' % (
+            path, width, SIZE[1], _node_tag(node))
         old = node['header'].value()
         if old != html:
             node['header'].setValue(html)
@@ -346,25 +357,144 @@ def _panel_of(label):
     return None
 
 
-def style_panel(node):
-    """Centre the header and put a spectral tick before each section title
-    in the node's open panel.  Nuke builds the panel's widgets after the
-    showPanel callback, so this runs once the event loop is back."""
+def _header_labels(node):
     tag = _node_tag(node)
-    tick = '<img src="%s" width="%d" height="%d" style="vertical-align: middle">' \
-           '&nbsp;&nbsp;' % ((tick_image(),) + TICK_SIZE)
-    for hl in QtWidgets.QApplication.allWidgets():
-        if not isinstance(hl, QtWidgets.QLabel) or tag not in hl.text():
-            continue
-        hl.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
-        hl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+    return [w for w in QtWidgets.QApplication.allWidgets()
+            if isinstance(w, QtWidgets.QLabel) and tag in w.text()]
+
+
+def style_panel(node):
+    """Fit the header to the node's open panel, put a spectral tick before
+    each section title and size a floating panel to its tab.  Nuke builds
+    the panel's widgets after the showPanel callback, so this runs once the
+    event loop is back."""
+    for hl in _header_labels(node):
+        # The header image sets its width, not the label: let the panel
+        # shrink, and redraw the header to fit.
+        hl.setMinimumWidth(1)
         panel = _panel_of(hl)
         if panel is None:
             continue
-        for l in panel.findChildren(QtWidgets.QLabel):
-            if l.text().strip() in SECTION_TITLES:
-                l.setTextFormat(QtCore.Qt.RichText)
-                l.setText(tick + l.text().strip())
+        _style_titles(panel)
+        _HeaderFitter.attach(node, hl, panel)
+        _fit_tabs(panel)
+
+
+def _style_titles(panel):
+    """A spectral tick before each section title.  Nuke right-aligns divider
+    titles to the label column, so the titles are given one width and
+    left-aligned, which lines the ticks up."""
+    tick = '<img src="%s" width="%d" height="%d" style="vertical-align: middle">' \
+           '&nbsp;&nbsp;' % ((tick_image(),) + TICK_SIZE)
+    titles = []
+    for l in panel.findChildren(QtWidgets.QLabel):
+        text = l.text().strip()
+        if text in SECTION_TITLES:
+            l.setTextFormat(QtCore.Qt.RichText)
+            l.setText(tick + text)
+            titles.append(l)
+        elif text.startswith(tick):
+            titles.append(l)
+    if not titles:
+        return
+    width = max(l.sizeHint().width() for l in titles)
+    for l in titles:
+        l.setMinimumWidth(width)
+        l.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+
+
+class _HeaderFitter(QtCore.QObject):
+    """Redraws a node's header to its panel's width when the panel is shown
+    or resized.  The redraw waits for resizing to pause."""
+
+    def __init__(self, node, label, panel):
+        super(_HeaderFitter, self).__init__(panel)
+        self._name = node.fullName()
+        self._label = label
+        self._panel = panel
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(60)
+        self._timer.timeout.connect(self.fit)
+        panel.installEventFilter(self)
+
+    @classmethod
+    def attach(cls, node, label, panel):
+        fitter = panel.property('flaresim_header_fitter')
+        if not isinstance(fitter, _HeaderFitter):
+            fitter = cls(node, label, panel)
+            panel.setProperty('flaresim_header_fitter', fitter)
+        fitter._label = label
+        fitter.fit()
+        return fitter
+
+    def eventFilter(self, obj, event):
+        if obj is self._panel and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Show):
+            self._timer.start()
+        return False
+
+    def width(self):
+        """The header width that leaves the same margin on both sides."""
+        try:
+            left = self._label.mapTo(self._panel, QtCore.QPoint(0, 0)).x()
+        except RuntimeError:       # the label was deleted with its panel
+            return 0
+        return max(MIN_WIDTH, (self._panel.width() - 2 * max(left, 0)) // 4 * 4)
+
+    def fit(self):
+        w = self.width()
+        if not w or _widths.get(self._name) == w:
+            return
+        _widths[self._name] = w
+        node = nuke.toNode(self._name)
+        if node is not None:
+            refresh(node)
+
+
+def _fit_tabs(panel):
+    """Size a floating panel to the tab on show rather than to its tallest
+    tab.  A docked panel fills its pane whatever its size, so it is left
+    alone."""
+    w = panel
+    stack = None
+    while w is not None:
+        parent = w.parentWidget()
+        if isinstance(parent, QtWidgets.QStackedWidget):
+            stack = parent
+            break
+        w = parent
+    if stack is None:
+        return
+
+    def apply(_index=None):
+        win = stack.window()
+        if win is None or isinstance(win, QtWidgets.QMainWindow) or win.isMaximized():
+            return
+        QtCore.QTimer.singleShot(0, fit)
+
+    def fit():
+        """Make the window as tall as the tab's knobs: what's around them
+        (title bar, tabs, buttons) stays, the knob area fits its content."""
+        try:
+            win = stack.window()
+            current = stack.currentWidget()
+        except RuntimeError:       # the panel was closed
+            return
+        if win is None or current is None:
+            return
+        content = panel if (current is panel or current.isAncestorOf(panel)) else current
+        need = win.height() - content.height() + content.sizeHint().height()
+        try:
+            need = min(need, win.screen().availableGeometry().height())
+        except Exception:
+            pass
+        if need > 0 and abs(need - win.height()) > 4:
+            win.resize(win.width(), need)
+
+    if not stack.property('flaresim_fit_tabs'):
+        stack.setProperty('flaresim_fit_tabs', True)
+        stack.currentChanged.connect(apply)
+    apply()
 
 
 def _style_later(node):

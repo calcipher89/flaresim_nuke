@@ -14,7 +14,7 @@ The original FlareSim is a Windows/Nuke 16 plugin built on CUDA 13. This fork ad
 
 ### FlareSim+ Panel Header
 
-The FlareSim tab opens with a FlareSim+ header: the wordmark with its spectral line, and a card for the node's lens showing a small render of its look, the lens name, the look name, and the focal length (the connected camera's, or the lens's own with its f-stop). It updates when the panel opens and when the lens, the look or the inputs change. The look thumbnail is the Lens Browser's preview, saved when you click **Apply to Node**; headers are cached in `~/.nuke/FlareSim/headers`.
+The FlareSim tab opens with a FlareSim+ header: the wordmark with its spectral line, and a card for the node's lens showing a small render of its look, the lens name, the look name, and the focal length (the connected camera's, or the lens's own with its f-stop). It updates when the panel opens and when the lens, the look or the inputs change. The look thumbnail is the Lens Browser's preview, saved when you click **Apply to Node**; headers are cached in `~/.nuke/FlareSim/headers`. The header stretches to the panel's width, section titles carry a matching spectral tick, and a floating panel is sized to the tab you're on.
 
 The new name is only what you see in the panel, the **Nodes** menu and the Lens Browser. The node classes are still `FlareSim` and `FlareSim3D`, so existing scripts and looks open as before.
 
@@ -202,7 +202,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 **FlareSim** (2D source):
 1. Connect your plate to the input.
-2. Click **Lens Browser** on the node to pick a lens with a live preview. The button shows the node's current lens.
+2. Click **Lens Browser** on the node to pick a lens with a live preview. The header at the top of the panel shows the node's current lens.
 3. Connect your shot camera to the **cam** input so the flare uses its focal length and film back. Without one, tick **Show Advanced** and set **FOV H** to match your camera.
 4. Pick the flare sources. **Source Mode** defaults to **Auto Detect**, where every bright light in the plate becomes a flare source:
    - Set **View** to **Sources Only** to see which lights are picked up, without rendering the flare.

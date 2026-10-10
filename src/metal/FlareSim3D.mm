@@ -213,26 +213,8 @@ public:
     float       surf_scale_[MAX_SURFS_UI];
     char        surf_labels_[MAX_SURFS_UI][64];
 
-    // The Lens Browser button names the current lens, since the Lens File
-    // knob itself is hidden.  Nuke keeps the label pointer, so it lives here.
-    char lens_button_label_[192] = "Lens Browser";
     // Name of the look last applied from the Lens Browser, for the header.
     std::string look_name_;
-
-    void update_lens_button_label()
-    {
-        std::string name(lens_file_ ? lens_file_ : "");
-        const size_t slash = name.find_last_of("/\\");
-        if (slash != std::string::npos) name = name.substr(slash + 1);
-        const size_t dot = name.rfind('.');
-        if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
-        if (name.empty())
-            snprintf(lens_button_label_, sizeof(lens_button_label_), "Lens Browser");
-        else
-            snprintf(lens_button_label_, sizeof(lens_button_label_),
-                     "Lens Browser  (%s)", name.c_str());
-        if (Knob* kb = knob("lens_browser")) kb->label(lens_button_label_);
-    }
 
     // ---- Runtime state ----
     LensSystem  lens_;
@@ -481,13 +463,13 @@ public:
         Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
         PyScript_knob(f, "import FlareSim_LensBrowser\n"
                          "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
-                      "lens_browser", lens_button_label_);
+                      "lens_browser", "Lens Browser");
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
-                   "then apply it to this node or save it as a look.  The button "
-                   "shows the node's current lens.");
+                   "then apply it to this node or save it as a look.  The header "
+                   "above shows the node's current lens.");
         Bool_knob(f, &show_advanced_, "show_advanced", "Show Advanced");
-        SetFlags(f, Knob::STARTLINE);
+        ClearFlags(f, Knob::STARTLINE);
         Tooltip(f, "Show every setting.  Off (default) keeps the panel to the "
                    "main controls: source, matte, quality, brightness, blur "
                    "and output.  Hidden settings still apply, and looks and "
@@ -721,8 +703,6 @@ public:
             if (Knob* x = knob("outside_source_falloff")) x->enable(color_from_plate_);
         }
         if (k->is("color_from_plate")) return 1;
-        if (k->is("showPanel"))
-            update_lens_button_label();   // and fall through
         if (k->is("surf_refresh")) { rebuild_surf_ui(); return 1; }
         if (k->is("surf_select_all") || k->is("surf_deselect_all")) {
             const bool val = k->is("surf_select_all");
@@ -750,7 +730,6 @@ public:
             return 1;
         }
         if (k->is("lens_file")) {
-            update_lens_button_label();
             const std::string path(lens_file_ ? lens_file_ : "");
             if (!path.empty() && path != last_lens_file_) {
                 if (lens_.load(path.c_str())) {
