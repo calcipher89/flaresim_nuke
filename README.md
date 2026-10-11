@@ -197,7 +197,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
    ```
-3. Restart Nuke. The nodes appear under **Filter** as **FlareSim+** and **FlareSim+ 3D**. The **Lens Browser** button on each node, and **Window → FlareSim+ Lens Browser**, open the Lens Browser window on the bundled lens library.
+3. Restart Nuke. The nodes appear under **Filter** as **FlareSim+** and **FlareSim+ 3D**. The **Lens Browser** button on each node opens the Lens Browser window on the bundled lens library.
 
 ### Studio and farm deployment
 
@@ -237,7 +237,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ### Lens Browser
 
-The **Lens Browser** button on a FlareSim or FlareSim3D node (or **Window → FlareSim+ Lens Browser**) opens a window for picking a lens and building a look before you render:
+The **Lens Browser** button on a FlareSim or FlareSim3D node opens a window for picking a lens and building a look before you render:
 
 - **Lens thumbnails**: every lens is shown as a small render of its flare, with the same light and settings, so you can compare them at a glance. The thumbnails sit under the preview: drag the divider between them to go from a single scrolling row (tiles grow to fill it) to a grid with more rows (the **Tile size** slider sets their size). Narrow them with the search box and the type (cine, stills, anamorphic), maker, focal length (including **Near camera** when the node has a camera) and speed filters on the left. The window remembers its size and dividers. Click a lens to preview it, double-click to apply it to the node, Page Up / Page Down to step through. Thumbnails are rendered in the background the first time (lenses on screen first) and cached in `~/.nuke/FlareSim/thumbnails`.
 - **Preview**: a live render of the selected lens. Drag in the preview to move the light and watch the ghosts follow; the mouse wheel changes exposure. It draws a quick draft while you drag, then refines. **Background...** puts a still of your plate behind it. Exposure, the preview light and the quality are remembered between sessions; **Reset** next to Exposure and **Reset Preview Light** put them back to their defaults.

@@ -194,6 +194,23 @@ def describe_panel(panel, stack=None, viewport=None):
                 lines.append('  %s page %d  %s' % (mark, i, describe(page)))
         if viewport is not None:
             lines.append('scroll  ' + describe(viewport))
+        lines.append('parents')
+        w = panel.parentWidget()
+        for _ in range(12):        # the chain up to the window, for the report
+            if w is None:
+                break
+            text = describe(w)
+            try:
+                if w.minimumHeight() > 0 or w.maximumHeight() < 16777215:
+                    text += ' minh %d maxh %d' % (w.minimumHeight(), w.maximumHeight())
+                if hasattr(w, 'widgetResizable'):
+                    text += ' resizable' if w.widgetResizable() else ' not resizable'
+            except RuntimeError:
+                break
+            lines.append('  ' + text)
+            if w.isWindow():
+                break
+            w = w.parentWidget()
         win = panel.window()
         lines.append('window  %s%s' % (describe(win),
                      ' floating' if win.isWindow() and win.parentWidget() is None else ''))

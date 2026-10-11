@@ -13,8 +13,7 @@ A standalone Qt window for picking a lens and building a flare look:
   * start from a saved look, apply the result to a FlareSim node, or save it
     as a new look
 
-Open it with the **Lens Browser** button on a FlareSim / FlareSim3D node, or
-from Window > FlareSim+ Lens Browser.
+Open it with the **Lens Browser** button on a FlareSim / FlareSim3D node.
 
 The preview is rendered by the flaresim_preview library that is built and
 installed next to the plugins.  Without it the window still works, minus the
@@ -3070,8 +3069,3 @@ def show_window(node=None):
 def show_for_node(node):
     """Called from the Lens Browser button on FlareSim / FlareSim3D."""
     return show_window(node)
-
-
-def register():
-    """Add the Lens Browser to the Window menu."""
-    nuke.menu('Nuke').addCommand('Window/FlareSim+ Lens Browser', show_window)
