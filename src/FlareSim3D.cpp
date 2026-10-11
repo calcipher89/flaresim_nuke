@@ -37,6 +37,8 @@
 #include "ghost.h"
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
+#include "extras.h"
+#include "layers.h"
 
 // Set to 1 to enable per-frame profiler output to stderr.
 #define FLARESIM_PROFILE 0
@@ -180,6 +182,15 @@ public:
     int         aperture_blades_;
     float       aperture_rotation_;
 
+    // Haze (veiling glare) and starburst, see extras.h
+    float       haze_gain_;
+    float       haze_radius_;
+    int         haze_passes_;
+    float       starburst_gain_;
+    float       starburst_scale_;
+    bool        output_layers_;            // flare / haze / starburst layers
+    flaresim::FlareExtras extras_;
+
     int         pupil_jitter_;
     int         jitter_seed_;
     bool        jitter_auto_seed_;
@@ -282,6 +293,12 @@ public:
         , ghost_blur_passes_(3)
         , aperture_blades_(0)
         , aperture_rotation_(0.0f)
+        , haze_gain_(0.0f)
+        , haze_radius_(0.15f)
+        , haze_passes_(3)
+        , starburst_gain_(0.0f)
+        , starburst_scale_(0.15f)
+        , output_layers_(false)
         , pupil_jitter_(0)
         , jitter_seed_(0)
         , jitter_auto_seed_(true)
@@ -333,6 +350,9 @@ public:
                "  matte — optional alpha: white hides the light (see Matte Mode)\n\n"
                "When the source is behind the camera: no flare is produced.\n"
                "When the source is off-screen: Outside Source knobs take over.\n\n"
+               "Output: the flare (ghosts, haze and starburst) in RGBA; "
+               "Output > Output Layers adds the parts on their own in the "
+               "flare, haze and starburst layers.\n\n"
                "Merge the flare over the beauty with a Merge (plus) node.";
     }
 
@@ -600,6 +620,38 @@ public:
         SetRange(f, 0.0, 1.0);
         Tooltip(f, "0 = soft rolloff, 1 = hard clip.  Matches AFXToneMap convention.");
 
+        Divider(f, "Haze");
+        Float_knob(f, &haze_gain_, "haze_gain", "Haze Gain");
+        SetRange(f, 0.0, 1.0);
+        Tooltip(f, "Veiling glare: a wide soft glow around each light, from "
+                   "light scattered inside the lens.  0 = off.\n"
+                   "Brighter and bigger lights give more haze.  At 1, a "
+                   "light of 8 x 8 pixels gives a haze that peaks at a tenth "
+                   "of its brightness (with Source Intensity in), so start "
+                   "low, around 0.05 to 0.2.");
+        adv_.add(f, Float_knob(f, &haze_radius_, "haze_radius", "Haze Radius"));
+        SetRange(f, 0.01, 0.5);
+        Tooltip(f, "How far the haze spreads, as a fraction of the image "
+                   "diagonal.  A wider haze is fainter: the same light is "
+                   "spread over more pixels.");
+        adv_.add(f, Int_knob(f, &haze_passes_, "haze_passes", "Haze Passes"));
+        SetRange(f, 1, 6);
+        Tooltip(f, "Box-blur passes.  3 approximates a Gaussian; more gives "
+                   "a softer core.");
+
+        Divider(f, "Starburst");
+        Float_knob(f, &starburst_gain_, "starburst_gain", "Starburst Gain");
+        SetRange(f, 0.0, 1.0);
+        Tooltip(f, "Diffraction spikes from the iris, drawn at the brightest "
+                   "lights (up to 32).  0 = off.\n"
+                   "The shape comes from Aperture Blades and Aperture "
+                   "Rotation (Show Advanced): 6 blades give 6 spikes, an odd "
+                   "count twice as many, 0 a round iris with soft rings.  "
+                   "Red spreads wider than blue, as in a real lens.");
+        adv_.add(f, Float_knob(f, &starburst_scale_, "starburst_scale", "Starburst Size"));
+        SetRange(f, 0.01, 0.5);
+        Tooltip(f, "Length of the spikes, as a fraction of the image diagonal.");
+
         Divider(f, "Post-process");
         Float_knob(f, &ghost_blur_, "ghost_blur", "Ghost Blur");
         adv_.add(f, Int_knob(f, &ghost_blur_passes_, "ghost_blur_passes", "Ghost Blur Passes"));
@@ -620,6 +672,14 @@ public:
         ClearFlags(f, Knob::STARTLINE);
         SetRange(f, 0.0, 500.0);
         Tooltip(f, "Format + Overscan: extra pixels added at the top and bottom of the format.");
+        Bool_knob(f, &output_layers_, "output_layers", "Output Layers");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Also output the parts of the flare on their own, for "
+                   "grading them separately:\n"
+                   "flare.rgb: the ghosts\n"
+                   "haze.rgb: the haze\n"
+                   "starburst.rgb: the starburst\n"
+                   "RGBA is always the whole flare.");
 
         Tab_knob(f, "Surfaces");
         Button(f, "surf_refresh",      "Refresh Surfaces");
@@ -783,6 +843,7 @@ public:
         info_.turn_on(Chan_Green);
         info_.turn_on(Chan_Blue);
         info_.turn_on(Chan_Alpha);
+        if (output_layers_) flaresim::turn_on_layers(info_);
 
         if (!for_real) return;
 
@@ -884,12 +945,13 @@ public:
         cache_height_ = h;
         PROF_END();
 
-        auto zero_buffers = [&]() {
+        auto zero_ghosts = [&]() {
             if (ghost_r_) std::memset(ghost_r_, 0, npx * sizeof(uint16_t));
             if (ghost_g_) std::memset(ghost_g_, 0, npx * sizeof(uint16_t));
             if (ghost_b_) std::memset(ghost_b_, 0, npx * sizeof(uint16_t));
             if (alpha_)   std::memset(alpha_,   0, npx * sizeof(uint16_t));
         };
+        auto zero_buffers = [&]() { zero_ghosts(); extras_.clear(); };
 
         if (lens_.surfaces.empty()) { zero_buffers(); return; }
 
@@ -1097,6 +1159,37 @@ public:
         if (Op::aborted()) { zero_buffers(); return; }
         if (sources.empty()) { zero_buffers(); return; }
 
+        // Haze and starburst, on the CPU from the same light.  Their sizes
+        // follow the same diagonal as Ghost Blur.
+        const bool  by_bbox   = (clip_to_ == flaresim::kClipBBox);
+        const float basis_w   = by_bbox ? (float)w : (float)pending_fmt_w_;
+        const float basis_h   = by_bbox ? (float)h : (float)pending_fmt_h_;
+        const float basis_diag = std::sqrt(basis_w * basis_w + basis_h * basis_h);
+        PROF_BEGIN("haze_starburst");
+        {
+            flaresim::ExtrasConfig xc;
+            xc.haze_gain         = haze_gain_;
+            xc.haze_radius       = haze_radius_;
+            xc.haze_passes       = haze_passes_;
+            xc.starburst_gain    = starburst_gain_;
+            xc.starburst_scale   = starburst_scale_;
+            xc.aperture_blades   = aperture_blades_;
+            xc.aperture_rotation = aperture_rotation_;
+            flaresim::ExtrasFrame xf;
+            xf.buf_w = w;  xf.buf_h = h;
+            xf.fmt_w = pending_fmt_w_;  xf.fmt_h = pending_fmt_h_;
+            xf.fmt_x0_in_buf = pending_fmt_x0_ - x0;
+            xf.fmt_y0_in_buf = pending_fmt_y0_ - y0;
+            xf.tan_half_h = std::tan(fov_h * 0.5f);
+            xf.tan_half_v = std::tan(fov_v * 0.5f);
+            xf.diag = basis_diag;
+            xf.light_size  = std::max(light_size_, 1.0f);
+            xf.light_scale = 1.0f / 1000.0f;   // the light carries Source Intensity x 1000
+            extras_.compute(xc, xf, sources);
+        }
+        PROF_END();
+        if (Op::aborted()) { zero_buffers(); return; }
+
         // ================================================================
         // Ghost rendering — same as FlareSim from here on
         // ================================================================
@@ -1203,7 +1296,8 @@ public:
         }
 
         last_pair_count_.store((int)active_pairs.size());
-        if (active_pairs.empty()) { zero_buffers(); return; }
+        // No ghosts: haze and starburst still show.
+        if (active_pairs.empty()) { zero_ghosts(); return; }
         if (Op::aborted()) { zero_buffers(); return; }
 
         pending_cuda_error_.clear();
@@ -1229,11 +1323,7 @@ public:
             if (ghost_blur_ > 0.0f && ghost_blur_passes_ > 0) {
                 // Sized from the format when Clip To sets the bbox, so
                 // changing the overscan doesn't change the blur.
-                const bool by_bbox = (clip_to_ == flaresim::kClipBBox);
-                const float bw = by_bbox ? (float)w : (float)pending_fmt_w_;
-                const float bh = by_bbox ? (float)h : (float)pending_fmt_h_;
-                float diag = std::sqrt(bw * bw + bh * bh);
-                radius = std::max(1, (int)std::round(ghost_blur_ * diag));
+                radius = std::max(1, (int)std::round(ghost_blur_ * basis_diag));
             }
             launch_blur_alpha_readback_async(
                 reinterpret_cast<float*>(ghost_r_),
@@ -1275,6 +1365,7 @@ public:
             ChannelSet pass_through(channels);
             pass_through -= Chan_Red; pass_through -= Chan_Green;
             pass_through -= Chan_Blue; pass_through -= Chan_Alpha;
+            if (output_layers_) flaresim::remove_layers(pass_through);
             if (pass_through) input0().get(y, x, r, pass_through, row);
         }
 
@@ -1304,6 +1395,10 @@ public:
         write_buf(Chan_Green, ghost_g_);
         write_buf(Chan_Blue,  ghost_b_);
         write_buf(Chan_Alpha, alpha_);
+
+        // Haze and starburst on top of the ghosts, and the layers.
+        flaresim::finish_row(extras_, output_layers_, valid_cache ? cache_y : -1,
+                             x, r, x_off, channels, row);
     }
 
     // ---- _request ----
@@ -1324,6 +1419,7 @@ public:
 
         ChannelSet passthru(channels);
         passthru -= Mask_RGBA;
+        if (output_layers_) flaresim::remove_layers(passthru);
         if (passthru) input0().request(x, y, r, t, passthru, count);
     }
 };

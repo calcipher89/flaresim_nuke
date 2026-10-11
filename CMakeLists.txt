@@ -76,6 +76,7 @@ set(FLARESIM_CORE_SOURCES
     src/trace.cpp
     src/ghost.cpp
     src/lens_path.cpp
+    src/extras.cpp
 )
 
 # ===========================================================================
@@ -116,6 +117,10 @@ if(FLARESIM_BUILD_TESTS)
     target_include_directories(flaresim_lens_path_test PRIVATE src)
     target_link_libraries(flaresim_lens_path_test PRIVATE ${CMAKE_DL_LIBS})
     add_test(NAME lens_path COMMAND flaresim_lens_path_test)
+
+    add_executable(flaresim_extras_test src/extras_test.cpp src/extras.cpp)
+    target_include_directories(flaresim_extras_test PRIVATE src)
+    add_test(NAME haze_starburst COMMAND flaresim_extras_test)
 
     add_executable(flaresim_preview_test src/preview_test.cpp)
     target_include_directories(flaresim_preview_test PRIVATE src)
