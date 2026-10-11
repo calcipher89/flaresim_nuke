@@ -3,7 +3,8 @@
 //
 // Shared by FlareSim and FlareSim3D.  RGB is always the whole flare
 // (ghosts + haze + starburst) and alpha its luminance.  With Output Layers
-// on, the parts also come out on their own:
+// on, the parts also come out on their own (haze and starburst only while
+// they are switched on):
 //
 //   flare.rgb      the ghosts
 //   haze.rgb       the haze
@@ -46,34 +47,47 @@ inline const OutputLayers& output_layers()
     return layers;
 }
 
+// Which layers the node outputs.  Haze and starburst only get a layer
+// while they are switched on.
+struct LayerSet
+{
+    bool flare = false, haze = false, starburst = false;
+    LayerSet() = default;
+    LayerSet(bool layers_on, bool haze_on, bool starburst_on)
+        : flare(layers_on), haze(layers_on && haze_on),
+          starburst(layers_on && starburst_on) {}
+};
+
 // Add the layers to the node's output channels.
 template <class Info>
-inline void turn_on_layers(Info& info)
+inline void turn_on_layers(Info& info, const LayerSet& on)
 {
     const OutputLayers& l = output_layers();
     for (int c = 0; c < 3; ++c) {
-        info.turn_on(l.flare[c]);
-        info.turn_on(l.haze[c]);
-        info.turn_on(l.starburst[c]);
+        if (on.flare)     info.turn_on(l.flare[c]);
+        if (on.haze)      info.turn_on(l.haze[c]);
+        if (on.starburst) info.turn_on(l.starburst[c]);
     }
 }
 
-inline void remove_layers(DD::Image::ChannelSet& set)
+// Take the layers the node writes out of a set of channels (what's left
+// passes through from the input).
+inline void remove_layers(DD::Image::ChannelSet& set, const LayerSet& on)
 {
     const OutputLayers& l = output_layers();
     for (int c = 0; c < 3; ++c) {
-        set -= l.flare[c];
-        set -= l.haze[c];
-        set -= l.starburst[c];
+        if (on.flare)     set -= l.flare[c];
+        if (on.haze)      set -= l.haze[c];
+        if (on.starburst) set -= l.starburst[c];
     }
 }
 
-// After the ghosts are in RGBA of row [x, r): copy them to flare.rgb, write
+// After the ghosts are in RGBA (and flare.rgb) of row [x, r): write
 // haze.rgb and starburst.rgb, and add haze and starburst to RGB and alpha.
 //   buf_y   the row inside the node's buffer, or -1 when there's nothing
 //           cached for it (the layers are then black)
 //   x_off   buffer column 0 in image coordinates
-inline void finish_row(const FlareExtras& fx, bool layers_on, int buf_y,
+inline void finish_row(const FlareExtras& fx, const LayerSet& on, int buf_y,
                        int x, int r, int x_off,
                        DD::Image::ChannelMask channels, DD::Image::Row& row)
 {
@@ -84,31 +98,22 @@ inline void finish_row(const FlareExtras& fx, bool layers_on, int buf_y,
     if (n <= 0) return;
     const bool have = buf_y >= 0 && !fx.empty();
 
-    if (layers_on) {
-        for (int c = 0; c < 3; ++c) {
-            if (channels.contains(l.flare[c])) {
-                float* dst = row.writable(l.flare[c]);
-                if (channels.contains(rgb[c])) {
-                    const float* src = row[rgb[c]];
-                    std::copy(src + x, src + r, dst + x);
-                } else {
-                    std::fill(dst + x, dst + r, 0.0f);
-                }
-            }
-            if (channels.contains(l.haze[c])) {
-                float* dst = row.writable(l.haze[c]);
-                std::fill(dst + x, dst + r, 0.0f);
-                if (have) fx.add_haze_row(c, buf_y, x - x_off, r - x_off, dst + x);
-            }
-            if (channels.contains(l.starburst[c])) {
-                float* dst = row.writable(l.starburst[c]);
-                std::fill(dst + x, dst + r, 0.0f);
-                if (have) fx.add_starburst_row(c, buf_y, x - x_off, r - x_off, dst + x);
-            }
+    for (int c = 0; c < 3; ++c) {
+        if (on.haze && channels.contains(l.haze[c])) {
+            float* dst = row.writable(l.haze[c]);
+            std::fill(dst + x, dst + r, 0.0f);
+            if (have) fx.add_haze_row(c, buf_y, x - x_off, r - x_off, dst + x);
+        }
+        if (on.starburst && channels.contains(l.starburst[c])) {
+            float* dst = row.writable(l.starburst[c]);
+            std::fill(dst + x, dst + r, 0.0f);
+            if (have) fx.add_starburst_row(c, buf_y, x - x_off, r - x_off, dst + x);
         }
     }
 
-    if (!have) return;
+    const bool want_rgba = channels.contains(Chan_Red) || channels.contains(Chan_Green) ||
+                           channels.contains(Chan_Blue) || channels.contains(Chan_Alpha);
+    if (!have || !want_rgba) return;
     std::vector<float> extra[3];
     for (int c = 0; c < 3; ++c) {
         extra[c].assign(n, 0.0f);
