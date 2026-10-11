@@ -88,13 +88,12 @@ inline void remove_layers(DD::Image::ChannelSet& set, const LayerSet& on)
     }
 }
 
-// One row of lens dirt, from the node's dirt input.
+// The ghosts of one row, when they light the lens dirt too.  The dirt
+// image itself (softened) lives in FlareExtras.
 struct DirtRow
 {
-    const float* dirt[3]  = { nullptr, nullptr, nullptr };  // indexed by image x; null = no dirt
-    const float* ghost[3] = { nullptr, nullptr, nullptr };  // ghosts, indexed 0..r-x; null = they don't light it
+    const float* ghost[3] = { nullptr, nullptr, nullptr };  // indexed 0..r-x; null = they don't light it
     float ghost_gain = 0.0f;
-    bool on() const { return dirt[0] != nullptr; }
 };
 
 // After the ghosts are in RGBA (and flare.rgb) of row [x, r): write
@@ -113,19 +112,26 @@ inline void finish_row(const FlareExtras& fx, const LayerSet& on, int buf_y,
     if (n <= 0) return;
     const int bx0 = x - x_off, bx1 = r - x_off;
     const bool cached = buf_y >= 0;
-    const bool lit_dirt = cached && dirt.on() && (fx.has_dirt() || dirt.ghost[0]);
+    const bool lit_dirt = cached && fx.has_dirt_image() && (fx.has_dirt() || dirt.ghost[0]);
 
-    // The dirt lit by the lights' glow and (optionally) the ghosts.
+    // The (softened) dirt lit by the lights' glow and optionally the
+    // ghosts, plus the veil it scatters.
     std::vector<float> dirt_px[3];
     if (lit_dirt) {
         for (int c = 0; c < 3; ++c) {
             std::vector<float>& d = dirt_px[c];
             d.assign(n, 0.0f);
+            const float* src = fx.dirt_row(c, buf_y);
+            if (!src) continue;
             fx.add_dirt_light_row(c, buf_y, bx0, bx1, d.data());
             if (dirt.ghost[c])
                 for (int i = 0; i < n; ++i) d[i] += dirt.ghost_gain * dirt.ghost[c][i];
-            const float* src = dirt.dirt[c] + x;
-            for (int i = 0; i < n; ++i) d[i] *= std::max(src[i], 0.0f);
+            const int dw = fx.dirt_width();
+            for (int i = 0; i < n; ++i) {
+                const int bx = bx0 + i;
+                d[i] *= (bx >= 0 && bx < dw) ? src[bx] : 0.0f;
+            }
+            fx.add_scatter_row(c, buf_y, bx0, bx1, d.data());
         }
     }
 

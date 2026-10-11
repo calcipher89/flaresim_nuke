@@ -57,6 +57,8 @@ LOOK_KNOBS = (
     'starburst_scale',
     'dirt_gain',
     'dirt_spread',
+    'dirt_softness',
+    'dirt_scatter',
     'dirt_ghosts',
 )
 
