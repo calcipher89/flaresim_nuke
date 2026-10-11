@@ -12,7 +12,7 @@
 #   --script PATH    also check the lens paths in this Nuke script
 #   --out PATH       where to write the report (default: your home folder)
 #
-# In Nuke: Help > FlareSim+ Self Test, or in the Script Editor:
+# In Nuke: Help > FlareSim+ > Self Test, or in the Script Editor:
 #
 #     import FlareSim_SelfTest; FlareSim_SelfTest.run()
 #

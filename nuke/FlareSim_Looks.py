@@ -18,6 +18,8 @@ import re
 
 import nuke
 
+import FlareSim_Log as _log
+
 
 LOOK_VERSION = 1
 
@@ -161,6 +163,9 @@ def resolve_lens(value):
     found = _search_lens(value)
     if found:
         _resolved[value] = found
+        _log.debug('lens', '%s found at %s', value, found)
+    else:
+        _log.debug('lens', '%s not found in %s', value, lens_search_roots())
     return found
 
 

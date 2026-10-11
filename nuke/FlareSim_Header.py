@@ -28,9 +28,10 @@ import json
 import math
 import os
 import re
-import sys
 
 import nuke
+
+import FlareSim_Log as _log
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
@@ -294,8 +295,8 @@ def refresh(node):
         if old != html:
             node['header'].setValue(html)
             _update_open_panels(node, old, html)
-    except Exception as e:
-        sys.stderr.write('FlareSim header: %s\n' % e)
+    except Exception:
+        _log.exception('header', 'could not draw the header of %s', node.name())
 
 
 def _node_tag(node):
@@ -486,19 +487,63 @@ class _PanelStyler(QtCore.QObject):
         self._name = node.fullName()
         self._label = label
         self._panel = panel
-        self._viewport = _scroll_viewport(panel)
-        self._stack = _stack_of(panel)
+        self._viewport = None
+        self._stack = None
+        self._window = None
+        self._searches = 0    # searches while not in tabs; capped (see _bind)
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(50)
         self._timer.timeout.connect(self.restyle)
         panel.installEventFilter(self)
-        if self._viewport is not None:
-            self._viewport.installEventFilter(self)
-        if self._stack is not None:
-            self._stack.installEventFilter(self)
-            self._stack.currentChanged.connect(self._tab_changed)
         panel.destroyed.connect(self._forget)
+        self._bind(force=True)
+
+    def _bind(self, force=False):
+        """Find the panel's tab stack and scroll area.  When a panel opens
+        again Nuke builds the knobs first and puts them in the tabs and the
+        window a moment later, so they are looked for again until found,
+        when the panel moves to another window (floated or docked), and
+        when the panel opens or Show Advanced is toggled (force)."""
+        try:
+            window = self._panel.window()
+        except RuntimeError:
+            return
+        stack_ok = _alive(self._stack) and self._stack.isAncestorOf(self._panel)
+        if not force and window is self._window and (stack_ok or self._searches >= 40):
+            return     # placed; or never placed in tabs, don't search on every event
+        self._searches = 0 if stack_ok or force else self._searches + 1
+        self._window = window
+        stack = _stack_of(self._panel)
+        viewport = _scroll_viewport(self._panel)
+        if stack is not self._stack:
+            if _alive(self._stack):
+                self._stack.removeEventFilter(self)
+                try:
+                    self._stack.currentChanged.disconnect(self._tab_changed)
+                except (RuntimeError, TypeError):
+                    pass
+            self._stack = stack
+            if stack is not None:
+                stack.installEventFilter(self)
+                stack.currentChanged.connect(self._tab_changed)
+            _log.debug('panel', '%s: tab stack %s', self._name, _log.describe(stack))
+        if viewport is not self._viewport:
+            if _alive(self._viewport):
+                self._viewport.removeEventFilter(self)
+            self._viewport = viewport
+            if viewport is not None:
+                viewport.installEventFilter(self)
+
+    def bound(self):
+        """True once the panel sits in its tabs."""
+        return _alive(self._stack)
+
+    def report(self):
+        """Lines describing the panel's layout, for the debug log/report."""
+        return _log.describe_panel(self._panel,
+                                   self._stack if _alive(self._stack) else None,
+                                   self._viewport if _alive(self._viewport) else None)
 
     def _forget(self, *_args):
         if _stylers.get(self._name) is self:
@@ -533,8 +578,13 @@ class _PanelStyler(QtCore.QObject):
         Show Advanced is toggled, so a window you resize by hand stays."""
         if not panel_styling() or not self.alive():
             return
+        self._bind(force=fit_window)
         _style_titles(self._panel)
         self._size_tabs_to_current()
+        if _log.enabled():
+            _log.debug('panel', '%s restyle%s\n%s', self._name,
+                       ' (open/toggle)' if fit_window else '',
+                       '\n'.join(self.report()))
         label = self.header_label()
         if label is not None:
             if label.minimumWidth() != 1:
@@ -576,6 +626,8 @@ class _PanelStyler(QtCore.QObject):
                 else QtWidgets.QSizePolicy.Ignored
             policy = page.sizePolicy()
             if policy.verticalPolicy() != want:
+                _log.debug('panel', '%s tab %d %s', self._name, i,
+                           'shown' if page is current else 'hidden, height ignored')
                 page.setSizePolicy(policy.horizontalPolicy(), want)
                 page.updateGeometry()
                 stack.updateGeometry()
@@ -601,6 +653,7 @@ class _PanelStyler(QtCore.QObject):
         except Exception:
             pass
         if need > 0 and abs(need - win.height()) > 4:
+            _log.debug('panel', '%s window %d -> %d high', self._name, win.height(), need)
             win.resize(win.width(), need)
 
 
@@ -622,7 +675,17 @@ def style_panel(node):
         styler = _PanelStyler(node, label, panel)
         _stylers[name] = styler
     styler.restyle(fit_window=True)
-    return True
+    return styler.bound()
+
+
+def open_panel_reports():
+    """(node name, lines) for each open FlareSim+ panel, for the debug
+    report."""
+    out = []
+    for name, styler in sorted(_stylers.items()):
+        if styler.alive():
+            out.append((name, styler.report()))
+    return out
 
 
 def _style_later(node):
@@ -644,11 +707,11 @@ def _style_later(node):
             n = nuke.toNode(name)
             if n is not None and style_panel(n):
                 state['done'] = True
-        except Exception as e:
+        except Exception:
             # Keep trying (Nuke may still be rebuilding the panel); say so once.
             if not state.get('reported'):
                 state['reported'] = True
-                sys.stderr.write('FlareSim header: %s\n' % e)
+                _log.exception('panel', 'styling %s', name)
     for ms in RETRY_MS:
         QtCore.QTimer.singleShot(ms, attempt)
 
@@ -768,6 +831,8 @@ def _on_knob_changed():
     k = nuke.thisKnob()
     if k is None:
         return
+    if _log.enabled() and k.name() not in ('selected', 'xpos', 'ypos'):
+        _log.debug('knob', '%s.%s', nuke.thisNode().fullName(), k.name())
     if k.name() in TRIGGER_KNOBS:
         refresh(nuke.thisNode())
     if k.name() in ('showPanel', 'inputChange', 'use_camera', 'fov_use_sensor',
