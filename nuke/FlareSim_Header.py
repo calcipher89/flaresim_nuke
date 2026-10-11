@@ -490,6 +490,7 @@ class _PanelStyler(QtCore.QObject):
         self._area = None
         self._stack = None
         self._window = None
+        self._skip_reason = None
         self._searches = 0    # searches while not in tabs; capped (see _bind)
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
@@ -613,6 +614,24 @@ class _PanelStyler(QtCore.QObject):
     def _fit_content_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_content)
 
+    def _scroll_content(self):
+        """The widget the panel's scroll area scrolls, and why not if
+        there's none to resize.  Nuke's panel scroll area isn't a plain
+        QScrollArea, so this looks for the viewport's child that holds the
+        panel rather than asking for QScrollArea.widget()."""
+        area = self._area
+        if not _alive(area):
+            return None, 'no scroll area'
+        if isinstance(area, QtWidgets.QScrollArea) and area.widgetResizable():
+            return None, 'the scroll area sizes it itself'
+        viewport = area.viewport()
+        for w in viewport.children():
+            if isinstance(w, QtWidgets.QWidget) and _alive(w) and \
+                    (w is self._panel or w.isAncestorOf(self._panel)):
+                return w, ''
+        return None, 'no scrolled widget holds the panel (%s)' % \
+            area.metaObject().className()
+
     def _fit_content(self):
         """Make the knob area as tall as the tab showing.  Nuke's panel
         scroll area doesn't resize its contents to follow them: it sizes
@@ -620,12 +639,11 @@ class _PanelStyler(QtCore.QObject):
         A panel that opens with a lens loaded is built while the Surfaces
         tab is the tallest, so the FlareSim tab stayed that tall even once
         the tabs no longer counted the hidden ones."""
-        area = self._area
-        if not isinstance(area, QtWidgets.QScrollArea) or not _alive(area) \
-                or area.widgetResizable():
-            return               # a resizable scroll area sizes it itself
-        w = area.widget()
-        if not _alive(w) or not w.isAncestorOf(self._panel):
+        w, why = self._scroll_content()
+        if w is None:
+            if why != self._skip_reason:
+                self._skip_reason = why
+                _log.debug('panel', '%s knob area not resized: %s', self._name, why)
             return
         stack = self._stack
         if _alive(stack) and w.isAncestorOf(stack) and stack.isVisible():
