@@ -72,6 +72,17 @@ A light that goes behind a foreground object stops flaring. Connect a roto, or t
 - Lights outside the frame are not affected, unless the matte's bbox reaches them (the overscan of an undistorted plate).
 - The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
 
+### Haze, Starburst and Output Layers
+
+Two light effects from the original FlareSim are back, on both FlareSim and FlareSim3D. Both are off (Gain 0) by default, so existing scripts render as before.
+
+- **Haze Gain** — veiling glare: a wide soft glow around each light from light scattered inside the lens. It carries the light's energy, so brighter and bigger lights give more haze and a wider haze is fainter. Start around 0.05 to 0.2. **Haze Radius** (fraction of the diagonal, default 0.15) and **Haze Passes** are under Show Advanced.
+- **Starburst Gain** — diffraction spikes from the iris at the brightest lights (up to 32). The shape comes from **Aperture Blades** and **Aperture Rotation**: 6 blades give 6 spikes, an odd count twice as many, 0 a round iris with soft rings. Red spreads wider than blue. **Starburst Size** is under Show Advanced.
+- Both follow the occlusion matte, since they are built from the same lights as the ghosts, and their sizes use the same diagonal as Ghost Blur.
+- **Output Layers** (Output section, off by default) — also outputs the parts on their own: `flare.rgb` (ghosts), `haze.rgb` and `starburst.rgb`, for grading them separately. RGBA is always the whole flare.
+- Looks save the haze and starburst settings.
+- Not yet in the Lens Browser preview, and the macOS (Metal) build doesn't have them yet.
+
 ### Spectral Jitter
 
 Randomises each ray's wavelength within its spectral bin, smoothing the hard colour boundaries between discrete samples at zero extra ray-trace cost — same number of traces, each one uses a slightly different wavelength.
@@ -391,7 +402,7 @@ Abbe number controls dispersion (rainbow color spread). Lower Abbe → more spec
 
 ## Future Ideas
 
-1. **Starburst as a separate node** — a standalone diffraction spike generator with more controls, decoupled from the ghost renderer.
+1. **Starburst as a separate node** — a standalone diffraction spike generator with more controls, decoupled from the ghost renderer (the node now has a built-in starburst; see Haze, Starburst and Output Layers).
 
 ---
 

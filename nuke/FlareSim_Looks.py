@@ -48,6 +48,11 @@ LOOK_KNOBS = (
     'highlight_knee',
     'ghost_blur',
     'ghost_blur_passes',
+    'haze_gain',
+    'haze_radius',
+    'haze_passes',
+    'starburst_gain',
+    'starburst_scale',
 )
 
 # Render settings a look no longer carries.  Older look files still list
