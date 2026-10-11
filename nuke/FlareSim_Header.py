@@ -466,9 +466,8 @@ def _innermost_ancestor(panel, cls):
     return None
 
 
-def _scroll_viewport(panel):
-    area = _innermost_ancestor(panel, QtWidgets.QAbstractScrollArea)
-    return area.viewport() if area is not None else None
+def _scroll_area(panel):
+    return _innermost_ancestor(panel, QtWidgets.QAbstractScrollArea)
 
 
 def _stack_of(panel):
@@ -488,6 +487,7 @@ class _PanelStyler(QtCore.QObject):
         self._label = label
         self._panel = panel
         self._viewport = None
+        self._area = None
         self._stack = None
         self._window = None
         self._searches = 0    # searches while not in tabs; capped (see _bind)
@@ -515,7 +515,8 @@ class _PanelStyler(QtCore.QObject):
         self._searches = 0 if stack_ok or force else self._searches + 1
         self._window = window
         stack = _stack_of(self._panel)
-        viewport = _scroll_viewport(self._panel)
+        self._area = _scroll_area(self._panel)
+        viewport = self._area.viewport() if self._area is not None else None
         if stack is not self._stack:
             if _alive(self._stack):
                 self._stack.removeEventFilter(self)
@@ -581,6 +582,7 @@ class _PanelStyler(QtCore.QObject):
         self._bind(force=fit_window)
         _style_titles(self._panel)
         self._size_tabs_to_current()
+        self._fit_content_later()
         if _log.enabled():
             _log.debug('panel', '%s restyle%s\n%s', self._name,
                        ' (open/toggle)' if fit_window else '',
@@ -605,7 +607,38 @@ class _PanelStyler(QtCore.QObject):
 
     def _tab_changed(self, *_args):
         self._size_tabs_to_current()
+        self._fit_content_later()
         self._fit_later()
+
+    def _fit_content_later(self, *_args):
+        QtCore.QTimer.singleShot(0, self._fit_content)
+
+    def _fit_content(self):
+        """Make the knob area as tall as the tab showing.  Nuke's panel
+        scroll area doesn't resize its contents to follow them: it sizes
+        them when the panel is built and when knobs are shown or hidden.
+        A panel that opens with a lens loaded is built while the Surfaces
+        tab is the tallest, so the FlareSim tab stayed that tall even once
+        the tabs no longer counted the hidden ones."""
+        area = self._area
+        if not isinstance(area, QtWidgets.QScrollArea) or not _alive(area) \
+                or area.widgetResizable():
+            return               # a resizable scroll area sizes it itself
+        w = area.widget()
+        if not _alive(w) or not w.isAncestorOf(self._panel):
+            return
+        stack = self._stack
+        if _alive(stack) and w.isAncestorOf(stack) and stack.isVisible():
+            # What's around the tabs stays; the tabs take the current tab's
+            # height.  (w's own size hint can still count every tab when the
+            # tabs sit in a QTabWidget.)
+            want = w.height() - stack.height() + \
+                max(stack.sizeHint().height(), stack.minimumSizeHint().height())
+        else:
+            want = max(w.sizeHint().height(), w.minimumSizeHint().height())
+        if want > 0 and abs(w.height() - want) > 2:
+            _log.debug('panel', '%s knob area %d -> %d high', self._name, w.height(), want)
+            w.resize(w.width(), want)
 
     def _size_tabs_to_current(self):
         """Make the tabs only as tall as the one showing.  Qt sizes every
