@@ -17,8 +17,10 @@
 //   brighter lights give more haze, and a wider haze is fainter.  At Haze
 //   Gain 1 and the default radius, a light of 8 x 8 pixels gives a haze
 //   that peaks at a tenth of its brightness.
-//   Starburst Gain scales the spikes; their centre is a small Airy disk,
-//   about a fifth of the light's brightness at Gain 1.
+//   Starburst Gain uses the original FlareSim's scale (typical 50 to 500):
+//   at the default Source Intensity of 8 a gain means the same as there.
+//   The spikes are faint next to their centre, a small Airy disk, so they
+//   need a large gain to show.
 // ============================================================================
 #pragma once
 

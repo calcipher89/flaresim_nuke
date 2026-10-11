@@ -74,12 +74,12 @@ A light that goes behind a foreground object stops flaring. Connect a roto, or t
 
 ### Haze, Starburst and Output Layers
 
-Two light effects from the original FlareSim are back, on both FlareSim and FlareSim3D. Both are off (Gain 0) by default, so existing scripts render as before.
+Two light effects from the original FlareSim are back, on both FlareSim and FlareSim3D. Each has its own checkbox, off by default, so existing scripts render as before.
 
-- **Haze Gain** — veiling glare: a wide soft glow around each light from light scattered inside the lens. It carries the light's energy, so brighter and bigger lights give more haze and a wider haze is fainter. Start around 0.05 to 0.2. **Haze Radius** (fraction of the diagonal, default 0.15) and **Haze Passes** are under Show Advanced.
-- **Starburst Gain** — diffraction spikes from the iris at the brightest lights (up to 32). The shape comes from **Aperture Blades** and **Aperture Rotation**: 6 blades give 6 spikes, an odd count twice as many, 0 a round iris with soft rings. Red spreads wider than blue. **Starburst Size** is under Show Advanced.
-- Both follow the occlusion matte, since they are built from the same lights as the ghosts, and their sizes use the same diagonal as Ghost Blur.
-- **Output Layers** (Output section, off by default) — also outputs the parts on their own: `flare.rgb` (ghosts), `haze.rgb` and `starburst.rgb`, for grading them separately. RGBA is always the whole flare.
+- **Haze** — veiling glare: a wide soft glow around each light from light scattered inside the lens. It carries the light's energy, so brighter and bigger lights give more haze and a wider haze is fainter. **Haze Gain** defaults to 0.1; try 0.05 to 0.2. **Haze Radius** (fraction of the diagonal, default 0.15) and **Haze Passes** are under Show Advanced.
+- **Starburst** — diffraction spikes from the iris at the brightest lights (up to 32). **Starburst Gain** uses the original FlareSim's scale: typical 50 to 500, default 100. The shape comes from **Aperture Blades** and **Aperture Rotation**: 6 blades give 6 spikes, an odd count twice as many, 0 a round iris with soft rings. Red spreads wider than blue. **Starburst Size** is under Show Advanced.
+- Both follow the occlusion matte and Source Intensity, since they are built from the same lights as the ghosts, and their sizes use the same diagonal as Ghost Blur.
+- **Output Layers** (Output section, off by default) — also outputs the parts on their own: `flare.rgb` (ghosts), plus `haze.rgb` while Haze is on and `starburst.rgb` while Starburst is on, for grading them separately. RGBA is always the whole flare.
 - Looks save the haze and starburst settings.
 - Not yet in the Lens Browser preview, and the macOS (Metal) build doesn't have them yet.
 

@@ -27,6 +27,10 @@ constexpr float kRefRadius    = 0.15f;
 constexpr float kRefPeak      = 0.1f;
 constexpr int   kPsfSize      = 512;
 constexpr int   kHazeMinRadius = 12;     // low-res blur radius the haze keeps
+// Starburst Gain unit.  The original FlareSim drew the plate's own values
+// times the gain; lights here carry Source Intensity (default 8), so a gain
+// is divided by 8 to keep the original's numbers.
+constexpr float kStarburstUnit = 1.0f / 8.0f;
 
 // 1D radix-2 Cooley-Tukey FFT, in place, n a power of two.
 void fft1d(std::complex<float>* data, int n)
@@ -297,7 +301,7 @@ void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& 
         if (ox0 >= ox1 || oy0 >= oy1) continue;
         const float rgb[3] = { p.r, p.g, p.b };
         for (int c = 0; c < 3; ++c) {
-            const float v = rgb[c] * cfg.starburst_gain;
+            const float v = rgb[c] * cfg.starburst_gain * kStarburstUnit;
             if (v <= 0.0f) continue;
             const float inv_r = half_n / (r_ref * scale_ch[c]);
             float* o = star_[c].data();

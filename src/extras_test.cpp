@@ -85,7 +85,7 @@ int main(int argc, char** argv)
 
     // Starburst with a six-blade iris.
     cfg.haze_gain = 0.0f;
-    cfg.starburst_gain = 1.0f;
+    cfg.starburst_gain = 8.0f;   // x 1/8: the light at its own brightness
     cfg.starburst_scale = 0.2f;
     cfg.aperture_blades = 6;
     fx.compute(cfg, fr, lights);

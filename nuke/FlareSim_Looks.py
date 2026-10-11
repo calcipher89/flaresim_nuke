@@ -48,9 +48,11 @@ LOOK_KNOBS = (
     'highlight_knee',
     'ghost_blur',
     'ghost_blur_passes',
+    'haze_enable',
     'haze_gain',
     'haze_radius',
     'haze_passes',
+    'starburst_enable',
     'starburst_gain',
     'starburst_scale',
 )

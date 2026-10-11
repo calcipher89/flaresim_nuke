@@ -277,12 +277,16 @@ public:
     float       aperture_rotation_;
 
     // Haze (veiling glare) and starburst, see extras.h
+    bool        haze_enable_;
     float       haze_gain_;
     float       haze_radius_;
     int         haze_passes_;
+    bool        starburst_enable_;
     float       starburst_gain_;
     float       starburst_scale_;
     bool        output_layers_;            // flare / haze / starburst layers
+    flaresim::LayerSet layers() const
+    { return { output_layers_, haze_enable_, starburst_enable_ }; }
     flaresim::FlareExtras extras_;         // written under compute_mutex_
 
     // Pupil sampling
@@ -433,10 +437,12 @@ public:
         , ghost_blur_passes_(3)
         , aperture_blades_(0)
         , aperture_rotation_(0.0f)
-        , haze_gain_(0.0f)
+        , haze_enable_(false)
+        , haze_gain_(0.1f)
         , haze_radius_(0.15f)
         , haze_passes_(3)
-        , starburst_gain_(0.0f)
+        , starburst_enable_(false)
+        , starburst_gain_(100.0f)
         , starburst_scale_(0.15f)
         , output_layers_(false)
         , pupil_jitter_(0)
@@ -918,14 +924,17 @@ public:
                    "Matches AFXToneMap convention.");
 
         Divider(f, "Haze");
+        Bool_knob(f, &haze_enable_, "haze_enable", "Haze");
+        Tooltip(f, "Add veiling glare: a wide soft glow around each light.  "
+                   "With Output Layers on, it also comes out in haze.rgb.");
         Float_knob(f, &haze_gain_, "haze_gain", "Haze Gain");
         SetRange(f, 0.0, 1.0);
         Tooltip(f, "Veiling glare: a wide soft glow around each light, from "
-                   "light scattered inside the lens.  0 = off.\n"
+                   "light scattered inside the lens.\n"
                    "Brighter and bigger lights give more haze.  At 1, a "
                    "light of 8 x 8 pixels gives a haze that peaks at a tenth "
-                   "of its brightness (with Source Intensity in), so start "
-                   "low, around 0.05 to 0.2.");
+                   "of its brightness (with Source Intensity in).  Default "
+                   "0.1; try 0.05 to 0.2.");
         adv_.add(f, Float_knob(f, &haze_radius_, "haze_radius", "Haze Radius"));
         SetRange(f, 0.01, 0.5);
         Tooltip(f, "How far the haze spreads, as a fraction of the image "
@@ -937,10 +946,15 @@ public:
                    "a softer core.");
 
         Divider(f, "Starburst");
+        Bool_knob(f, &starburst_enable_, "starburst_enable", "Starburst");
+        Tooltip(f, "Add diffraction spikes at the brightest lights.  With "
+                   "Output Layers on, they also come out in starburst.rgb.");
         Float_knob(f, &starburst_gain_, "starburst_gain", "Starburst Gain");
-        SetRange(f, 0.0, 1.0);
+        SetRange(f, 0.0, 500.0);
         Tooltip(f, "Diffraction spikes from the iris, drawn at the brightest "
-                   "lights (up to 32).  0 = off.\n"
+                   "lights (up to 32).  Same scale as the original FlareSim: "
+                   "typical 50 to 500, default 100.  It follows Source "
+                   "Intensity, like the ghosts.\n"
                    "The shape comes from Aperture Blades and Aperture "
                    "Rotation (Show Advanced): 6 blades give 6 spikes, an odd "
                    "count twice as many, 0 a round iris with soft rings.  "
@@ -976,8 +990,8 @@ public:
         Tooltip(f, "Also output the parts of the flare on their own, for "
                    "grading them separately:\n"
                    "flare.rgb: the ghosts\n"
-                   "haze.rgb: the haze\n"
-                   "starburst.rgb: the starburst\n"
+                   "haze.rgb: the haze (when Haze is on)\n"
+                   "starburst.rgb: the starburst (when Starburst is on)\n"
                    "RGBA is always the whole flare.");
 
         // ---- Per-surface toggle + gain tab ----
@@ -1048,6 +1062,10 @@ public:
             const bool over = (clip_to_ == flaresim::kClipOverscan);
             if (Knob* x = knob("overscan_w")) x->enable(over);
             if (Knob* x = knob("overscan_h")) x->enable(over);
+            for (const char* name : { "haze_gain", "haze_radius", "haze_passes" })
+                if (Knob* x = knob(name)) x->enable(haze_enable_);
+            for (const char* name : { "starburst_gain", "starburst_scale" })
+                if (Knob* x = knob(name)) x->enable(starburst_enable_);
         };
         if (k->is("showPanel")) {
             // A script saved before Quality existed keeps its own Ray Grid.
@@ -1059,7 +1077,8 @@ public:
             sync_simple_ui();
             // fall through
         }
-        if (k->is("show_advanced") || k->is("clip_to")) {
+        if (k->is("show_advanced") || k->is("clip_to") ||
+            k->is("haze_enable") || k->is("starburst_enable")) {
             sync_simple_ui();
             return 1;
         }
@@ -1224,7 +1243,7 @@ public:
         info_.turn_on(Chan_Green);
         info_.turn_on(Chan_Blue);
         info_.turn_on(Chan_Alpha);
-        if (output_layers_) flaresim::turn_on_layers(info_);
+        flaresim::turn_on_layers(info_, layers());
 
         if (!for_real) return;
 
@@ -1646,10 +1665,10 @@ public:
         PROF_BEGIN("haze_starburst");
         {
             flaresim::ExtrasConfig xc;
-            xc.haze_gain         = haze_gain_;
+            xc.haze_gain         = haze_enable_ ? haze_gain_ : 0.0f;
             xc.haze_radius       = haze_radius_;
             xc.haze_passes       = haze_passes_;
-            xc.starburst_gain    = starburst_gain_;
+            xc.starburst_gain    = starburst_enable_ ? starburst_gain_ : 0.0f;
             xc.starburst_scale   = starburst_scale_;
             xc.aperture_blades   = aperture_blades_;
             xc.aperture_rotation = aperture_rotation_;
@@ -1866,7 +1885,7 @@ public:
             pass_through -= Chan_Green;
             pass_through -= Chan_Blue;
             pass_through -= Chan_Alpha;
-            if (output_layers_) flaresim::remove_layers(pass_through);
+            flaresim::remove_layers(pass_through, layers());
             if (pass_through)
                 input0().get(y, x, r, pass_through, row);
         }
@@ -1897,9 +1916,16 @@ public:
         write_buf(Chan_Green, ghost_g_);
         write_buf(Chan_Blue,  ghost_b_);
         write_buf(Chan_Alpha, alpha_);
+        const flaresim::LayerSet on = layers();
+        if (on.flare) {
+            const flaresim::OutputLayers& l = flaresim::output_layers();
+            write_buf(l.flare[0], ghost_r_);
+            write_buf(l.flare[1], ghost_g_);
+            write_buf(l.flare[2], ghost_b_);
+        }
 
         // Haze and starburst on top of the ghosts, and the layers.
-        flaresim::finish_row(extras_, output_layers_, valid_cache ? cache_y : -1,
+        flaresim::finish_row(extras_, on, valid_cache ? cache_y : -1,
                              x, r, x_off, channels, row);
 
         // Draw source markers on top (View = Flare + Sources / Sources Only).
@@ -1937,7 +1963,7 @@ public:
         // Pass non-RGBA channels through for the requested region only.
         ChannelSet passthru(channels);
         passthru -= Mask_RGBA;
-        if (output_layers_) flaresim::remove_layers(passthru);
+        flaresim::remove_layers(passthru, layers());
         if (passthru)
             input0().request(x, y, r, t, passthru, count);
     }
