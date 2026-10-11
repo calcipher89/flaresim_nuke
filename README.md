@@ -1,12 +1,12 @@
 # FlareSim+ for Nuke
 
-A physically-based lens flare simulator for Foundry Nuke — GPU-optimised fork of [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke).
+An artist-focused lens flare tool for Foundry Nuke, built on [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke) and [petermercell/flaresim_nuke](https://github.com/petermercell/flaresim_nuke).
 
-![FlareSim](FlareSim.png)
+Many thanks to Steven (LocalStarlight) for open-sourcing FlareSim, and Peter Mercell for his fork. Steven built the real optics: rays traced through actual lens prescriptions, Fresnel coatings, haze and starburst. Peter made it fast, with a much quicker GPU pipeline, Linux and macOS builds, anamorphic lenses and a 3D node.
 
-I really appreciate Steven (LocalStarlight) for open-sourcing FlareSim. This is my version from the eyes of a compositor — built to be fast and flexible enough to handle everything a client might ask for.
+The first time I tried FlareSim, I looked at it from an artist's point of view. I've always liked how Video Copilot's Optical Flares lets you browse flare presets. That OG tool had a great preset browser where you could shape the overall look of each flare element.
 
-The original FlareSim is a Windows/Nuke 16 plugin built on CUDA 13. This fork adds **Linux** and **macOS** support, works with **Nuke 14–17**, and brings major GPU performance improvements — async CUDA streams, FP16 output, prefix-sum blur kernels, and a per-surface art-direction UI. The core optics (ray tracing, Fresnel, lens files) are unchanged; all the work is in the GPU pipeline, the Nuke integration, and the build system.
+So FlareSim+ keeps the physics and the speed, and puts an artist-friendly layer on top. It has a Lens Browser with a live preview and looks you can save, a simple panel with a Quality menu, bright lights in the plate as the flare source, a camera input, matte occlusion, and haze, starburst, lens dirt and AOV layers for the comp. It's built to drop into a studio pipeline and run across the farm, and just work. :)
 
 ---
 
