@@ -474,6 +474,17 @@ def _stack_of(panel):
     return _innermost_ancestor(panel, QtWidgets.QStackedWidget)
 
 
+_FOLDED = 'flaresim_folded'   # widget property: hidden by _PanelStyler._fold
+
+
+def _is_folded(page):
+    try:
+        return any(isinstance(w, QtWidgets.QWidget) and w.property(_FOLDED)
+                   for w in page.children())
+    except RuntimeError:
+        return False
+
+
 class _PanelStyler(QtCore.QObject):
     """Styles one node's open panel and keeps it styled: re-applies the
     ticks when Nuke rebuilds the knobs, redraws the header to the width of
@@ -519,7 +530,11 @@ class _PanelStyler(QtCore.QObject):
         stack = _stack_of(self._panel)
         self._area = _scroll_area(self._panel)
         viewport = self._area.viewport() if self._area is not None else None
+        if stack is None and _alive(self._stack) and self._stack.isAncestorOf(self._panel):
+            stack = self._stack      # Nuke is rebuilding; keep the tabs we have
         if stack is not self._stack:
+            # Never leave the old tabs' knobs hidden.
+            self._unfold_all()
             if _alive(self._stack):
                 self._stack.removeEventFilter(self)
                 try:
@@ -570,6 +585,10 @@ class _PanelStyler(QtCore.QObject):
 
     def eventFilter(self, obj, event):
         t = event.type()
+        if t == QtCore.QEvent.Show and obj is not self._panel and _is_folded(obj):
+            # A tab is coming up with its knobs hidden (Nuke switched tabs
+            # without the tab stack saying so): show them straight away.
+            self._size_tabs_to_current(showing=obj)
         if t in (QtCore.QEvent.Resize, QtCore.QEvent.Show, QtCore.QEvent.ChildAdded,
                  QtCore.QEvent.LayoutRequest):
             self._timer.start()          # coalesces bursts of events
@@ -659,7 +678,7 @@ class _PanelStyler(QtCore.QObject):
             _log.debug('panel', '%s knob area %d -> %d high', self._name, w.height(), want)
             w.resize(w.width(), want)
 
-    def _size_tabs_to_current(self):
+    def _size_tabs_to_current(self, showing=None):
         """Make the tabs only as tall as the one showing.  Qt sizes every
         tab to the tallest one, and the Surfaces tab gets a row per lens
         surface, so once a lens is loaded the FlareSim tab was as long as
@@ -671,13 +690,18 @@ class _PanelStyler(QtCore.QObject):
         stack = self._stack
         if stack is None or not _alive(stack):
             return
-        current = stack.currentWidget()
+        current = showing or stack.currentWidget()
         try:
+            pages = [stack.widget(i) for i in range(stack.count())]
+            visible = [p for p in pages if _alive(p) and p.isVisible()]
+            if showing is None and visible and current not in visible:
+                current = visible[0]     # trust what's on screen
             for i in range(stack.count()):
                 page = stack.widget(i)
                 if not _alive(page):
                     continue
                 showing = page is current
+                page.installEventFilter(self)   # Show (see eventFilter), ChildAdded
                 want = QtWidgets.QSizePolicy.Preferred if showing \
                     else QtWidgets.QSizePolicy.Ignored
                 policy = page.sizePolicy()
@@ -699,8 +723,7 @@ class _PanelStyler(QtCore.QObject):
                         tabs.updateGeometry()
         except Exception:
             # Never leave a tab's knobs hidden because of an error here.
-            for page in list(self._folded):
-                self._unfold(page)
+            self._unfold_all()
             raise
 
     def _fold(self, page):
@@ -712,6 +735,7 @@ class _PanelStyler(QtCore.QObject):
         for w in page.children():
             if isinstance(w, QtWidgets.QWidget) and _alive(w) and not w.isHidden() \
                     and not w.isWindow():
+                w.setProperty(_FOLDED, True)   # so any styler can show it again
                 w.hide()
                 folded.append(w)
                 added = True
@@ -720,13 +744,33 @@ class _PanelStyler(QtCore.QObject):
         return added
 
     def _unfold(self, page):
-        folded = self._folded.pop(page, None)
-        if not folded:
-            return False
+        """Show what _fold hid in this tab, including widgets an earlier
+        styler of the panel hid (marked with a property, so nothing is
+        lost if the styler or the tab stack it knew was replaced)."""
+        folded = list(self._folded.pop(page, None) or [])
+        try:
+            folded.extend(w for w in page.children()
+                          if isinstance(w, QtWidgets.QWidget) and w.property(_FOLDED))
+        except RuntimeError:
+            pass
+        shown = False
         for w in folded:
-            if _alive(w):
+            if _alive(w) and w.property(_FOLDED):
+                w.setProperty(_FOLDED, False)
                 w.show()
-        return True
+                shown = True
+        return shown
+
+    def _unfold_all(self):
+        for page in list(self._folded):
+            if _alive(page):
+                self._unfold(page)
+        self._folded.clear()
+        if _alive(self._stack):
+            for i in range(self._stack.count()):
+                page = self._stack.widget(i)
+                if _alive(page):
+                    self._unfold(page)
 
     def _fit_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_window)
