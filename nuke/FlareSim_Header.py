@@ -491,6 +491,7 @@ class _PanelStyler(QtCore.QObject):
         self._stack = None
         self._window = None
         self._skip_reason = None
+        self._folded = {}     # hidden tab page -> its child widgets we hid
         self._searches = 0    # searches while not in tabs; capped (see _bind)
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
@@ -662,26 +663,70 @@ class _PanelStyler(QtCore.QObject):
         """Make the tabs only as tall as the one showing.  Qt sizes every
         tab to the tallest one, and the Surfaces tab gets a row per lens
         surface, so once a lens is loaded the FlareSim tab was as long as
-        the Surfaces tab (empty space and a scroll bar under the knobs).
-        Hidden tabs get an Ignored vertical size policy, which the tab
-        stack leaves out of its size."""
+        the Surfaces tab.  Hidden tabs get an Ignored vertical size policy,
+        which the tab stack leaves out of its size.  The tab widget itself
+        (and so the docked Properties bin, which stacks panels at their
+        size hint) still counts every tab, so the contents of the tabs not
+        showing are hidden too, and shown again when their tab is picked."""
         stack = self._stack
         if stack is None or not _alive(stack):
             return
         current = stack.currentWidget()
-        for i in range(stack.count()):
-            page = stack.widget(i)
-            if not _alive(page):
-                continue
-            want = QtWidgets.QSizePolicy.Preferred if page is current \
-                else QtWidgets.QSizePolicy.Ignored
-            policy = page.sizePolicy()
-            if policy.verticalPolicy() != want:
-                _log.debug('panel', '%s tab %d %s', self._name, i,
-                           'shown' if page is current else 'hidden, height ignored')
-                page.setSizePolicy(policy.horizontalPolicy(), want)
-                page.updateGeometry()
-                stack.updateGeometry()
+        try:
+            for i in range(stack.count()):
+                page = stack.widget(i)
+                if not _alive(page):
+                    continue
+                showing = page is current
+                want = QtWidgets.QSizePolicy.Preferred if showing \
+                    else QtWidgets.QSizePolicy.Ignored
+                policy = page.sizePolicy()
+                changed = False
+                if policy.verticalPolicy() != want:
+                    page.setSizePolicy(policy.horizontalPolicy(), want)
+                    changed = True
+                if showing:
+                    changed = self._unfold(page) or changed
+                else:
+                    changed = self._fold(page) or changed
+                if changed:
+                    _log.debug('panel', '%s tab %d %s', self._name, i,
+                               'shown' if showing else 'hidden, contents folded')
+                    page.updateGeometry()
+                    stack.updateGeometry()
+                    tabs = stack.parentWidget()
+                    if _alive(tabs):
+                        tabs.updateGeometry()
+        except Exception:
+            # Never leave a tab's knobs hidden because of an error here.
+            for page in list(self._folded):
+                self._unfold(page)
+            raise
+
+    def _fold(self, page):
+        """Hide a hidden tab's child widgets so they add no height.  Only
+        widgets that were showing are hidden, and only those are shown
+        again, so knobs Nuke hides itself stay hidden."""
+        folded = self._folded.setdefault(page, [])
+        added = False
+        for w in page.children():
+            if isinstance(w, QtWidgets.QWidget) and _alive(w) and not w.isHidden() \
+                    and not w.isWindow():
+                w.hide()
+                folded.append(w)
+                added = True
+        if added:
+            page.installEventFilter(self)   # Nuke adds rows when a lens loads
+        return added
+
+    def _unfold(self, page):
+        folded = self._folded.pop(page, None)
+        if not folded:
+            return False
+        for w in folded:
+            if _alive(w):
+                w.show()
+        return True
 
     def _fit_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_window)
