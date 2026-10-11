@@ -55,6 +55,9 @@ LOOK_KNOBS = (
     'starburst_enable',
     'starburst_gain',
     'starburst_scale',
+    'dirt_gain',
+    'dirt_spread',
+    'dirt_ghosts',
 )
 
 # Render settings a look no longer carries.  Older look files still list

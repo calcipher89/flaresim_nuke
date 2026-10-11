@@ -25,6 +25,10 @@ namespace {
 constexpr float kRefLightArea = 64.0f;
 constexpr float kRefRadius    = 0.15f;
 constexpr float kRefPeak      = 0.1f;
+// Dirt Gain 1: the same light at Dirt Spread kDirtRefRadius lights the
+// dirt at kDirtRefPeak of its brightness (dirt value 1 = that much light).
+constexpr float kDirtRefRadius = 0.4f;
+constexpr float kDirtRefPeak   = 0.25f;
 constexpr int   kPsfSize      = 512;
 constexpr int   kHazeMinRadius = 12;     // low-res blur radius the haze keeps
 // Starburst Gain unit.  The original FlareSim drew the plate's own values
@@ -183,11 +187,9 @@ void starburst_psf(int blades, float rotation_deg, int n, std::vector<float>& ou
 
 void FlareExtras::clear()
 {
-    for (int c = 0; c < 3; ++c) {
-        haze_[c].clear();
-        star_[c].clear();
-    }
-    haze_w_ = haze_h_ = 0;
+    haze_.clear();
+    dirt_.clear();
+    for (int c = 0; c < 3; ++c) star_[c].clear();
     star_w_ = star_h_ = 0;
 }
 
@@ -196,36 +198,49 @@ void FlareExtras::compute(const ExtrasConfig& cfg, const ExtrasFrame& frame,
 {
     clear();
     if (lights.empty() || frame.buf_w <= 0 || frame.buf_h <= 0) return;
-    if (cfg.haze_gain > 0.0f)      compute_haze(cfg, frame, lights);
+    if (cfg.haze_gain > 0.0f)
+        haze_.compute(cfg.haze_gain, cfg.haze_radius, cfg.haze_passes,
+                      kRefRadius, kRefPeak, frame, lights);
+    if (cfg.dirt_gain > 0.0f)
+        dirt_.compute(cfg.dirt_gain, cfg.dirt_spread, 3,
+                      kDirtRefRadius, kDirtRefPeak, frame, lights);
     if (cfg.starburst_gain > 0.0f) compute_starburst(cfg, frame, lights);
 }
 
-void FlareExtras::compute_haze(const ExtrasConfig& cfg, const ExtrasFrame& f,
-                               const std::vector<BrightPixel>& lights)
+void GlowField::clear()
 {
+    for (int c = 0; c < 3; ++c) ch[c].clear();
+    w = h = 0;  ds = 1;  pad = 0;
+}
+
+void GlowField::compute(float gain, float radius, int passes_in, float ref_radius,
+                        float ref_peak, const ExtrasFrame& f,
+                        const std::vector<BrightPixel>& lights)
+{
+    clear();
     const float diag = f.diag > 0.0f ? f.diag
         : std::sqrt((float)f.buf_w * f.buf_w + (float)f.buf_h * f.buf_h);
-    const int radius_px = std::max(1, (int)std::lround(std::max(cfg.haze_radius, 0.0f) * diag));
-    const int passes    = std::max(cfg.haze_passes, 1);
+    const int radius_px = std::max(1, (int)std::lround(std::max(radius, 0.0f) * diag));
+    const int passes    = std::max(passes_in, 1);
 
     // A blur this wide doesn't need every pixel: work at a resolution where
     // the radius is still kHazeMinRadius pixels or more.
-    const int ds = std::max(1, radius_px / kHazeMinRadius);
-    const int lr = std::max(1, (int)std::lround((float)radius_px / ds));
+    const int lds = std::max(1, radius_px / kHazeMinRadius);
+    const int lr = std::max(1, (int)std::lround((float)radius_px / lds));
     // The grid reaches past the buffer by the blur's reach, so lights just
-    // outside it (Manual XY lights flare off screen) still add haze.
-    const int pad = lr * passes;
-    const int lw = (f.buf_w + ds - 1) / ds + 2 * pad;
-    const int lh = (f.buf_h + ds - 1) / ds + 2 * pad;
+    // outside it (Manual XY lights flare off screen) still add glow.
+    const int lpad = lr * passes;
+    const int lw = (f.buf_w + lds - 1) / lds + 2 * lpad;
+    const int lh = (f.buf_h + lds - 1) / lds + 2 * lpad;
 
     // Each light's light, splatted (bilinear) into the low-res grid.  A
-    // cell holds the average over its ds x ds full-res pixels.
+    // cell holds the average over its lds x lds full-res pixels.
     const float area = std::max(f.light_size, 1.0f) * std::max(f.light_size, 1.0f);
-    const float cell = 1.0f / ((float)ds * ds);
-    for (int c = 0; c < 3; ++c) haze_[c].assign((size_t)lw * lh, 0.0f);
+    const float cell = 1.0f / ((float)lds * lds);
+    for (int c = 0; c < 3; ++c) ch[c].assign((size_t)lw * lh, 0.0f);
     for (const BrightPixel& bp : lights) {
         const LightPos p = light_pos(bp, f);
-        const float gx = p.x / ds - 0.5f + pad, gy = p.y / ds - 0.5f + pad;
+        const float gx = p.x / lds - 0.5f + lpad, gy = p.y / lds - 0.5f + lpad;
         const int ix = (int)std::floor(gx), iy = (int)std::floor(gy);
         const float fx = gx - ix, fy = gy - iy;
         const float rgb[3] = { p.r, p.g, p.b };
@@ -238,25 +253,48 @@ void FlareExtras::compute_haze(const ExtrasConfig& cfg, const ExtrasFrame& f,
                 if (x < 0 || x >= lw) continue;
                 const float wgt = (dx ? fx : 1.0f - fx) * wy * area * cell;
                 for (int c = 0; c < 3; ++c)
-                    haze_[c][(size_t)y * lw + x] += rgb[c] * wgt;
+                    ch[c][(size_t)y * lw + x] += rgb[c] * wgt;
             }
         }
     }
 
     std::vector<float> tmp;
     for (int c = 0; c < 3; ++c)
-        box_blur_inplace(haze_[c].data(), lw, lh, lr, passes, tmp, /*zero_edges=*/true);
+        box_blur_inplace(ch[c].data(), lw, lh, lr, passes, tmp, /*zero_edges=*/true);
 
-    // Scale so that Gain 1 matches kRefPeak for the reference light at the
+    // Scale so that Gain 1 gives ref_peak for the reference light at the
     // reference radius (3 passes).  The peak of a blurred point of energy E
     // (in full-res pixels) is E * peak1d^2 at full resolution.
-    const int ref_r = std::max(1, (int)std::lround(kRefRadius * diag));
+    const int ref_r = std::max(1, (int)std::lround(ref_radius * diag));
     const float ref1d = box_blur_peak(ref_r, 3);
-    const float norm = cfg.haze_gain * kRefPeak / (kRefLightArea * ref1d * ref1d);
+    const float norm = gain * ref_peak / (kRefLightArea * ref1d * ref1d);
     for (int c = 0; c < 3; ++c)
-        for (float& v : haze_[c]) v *= norm;
+        for (float& v : ch[c]) v *= norm;
 
-    haze_w_ = lw;  haze_h_ = lh;  haze_ds_ = ds;  haze_pad_ = pad;
+    w = lw;  h = lh;  ds = lds;  pad = lpad;
+}
+
+void GlowField::add_row(int c, int y, int x0, int x1, float* dst) const
+{
+    if (empty() || y < 0 || c < 0 || c > 2) return;
+    const std::vector<float>& g = ch[c];
+    const float gy = (y + 0.5f) / ds - 0.5f + pad;
+    int iy = (int)std::floor(gy);
+    const float fy = gy - iy;
+    const int ya = std::clamp(iy, 0, h - 1);
+    const int yb = std::clamp(iy + 1, 0, h - 1);
+    const float* ra = g.data() + (size_t)ya * w;
+    const float* rb = g.data() + (size_t)yb * w;
+    for (int x = x0; x < x1; ++x) {
+        const float gx = (x + 0.5f) / ds - 0.5f + pad;
+        const int ix = (int)std::floor(gx);
+        const float fx = gx - ix;
+        const int xa = std::clamp(ix, 0, w - 1);
+        const int xb = std::clamp(ix + 1, 0, w - 1);
+        const float top = ra[xa] * (1.0f - fx) + ra[xb] * fx;
+        const float bot = rb[xa] * (1.0f - fx) + rb[xb] * fx;
+        dst[x - x0] += top * (1.0f - fy) + bot * fy;
+    }
 }
 
 void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& f,
@@ -326,29 +364,6 @@ void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& 
         }
     }
     star_w_ = w;  star_h_ = h;
-}
-
-void FlareExtras::add_haze_row(int c, int y, int x0, int x1, float* dst) const
-{
-    if (!has_haze() || y < 0 || c < 0 || c > 2) return;
-    const std::vector<float>& g = haze_[c];
-    const float gy = (y + 0.5f) / haze_ds_ - 0.5f + haze_pad_;
-    int iy = (int)std::floor(gy);
-    const float fy = gy - iy;
-    const int ya = std::clamp(iy, 0, haze_h_ - 1);
-    const int yb = std::clamp(iy + 1, 0, haze_h_ - 1);
-    const float* ra = g.data() + (size_t)ya * haze_w_;
-    const float* rb = g.data() + (size_t)yb * haze_w_;
-    for (int x = x0; x < x1; ++x) {
-        const float gx = (x + 0.5f) / haze_ds_ - 0.5f + haze_pad_;
-        const int ix = (int)std::floor(gx);
-        const float fx = gx - ix;
-        const int xa = std::clamp(ix, 0, haze_w_ - 1);
-        const int xb = std::clamp(ix + 1, 0, haze_w_ - 1);
-        const float top = ra[xa] * (1.0f - fx) + ra[xb] * fx;
-        const float bot = rb[xa] * (1.0f - fx) + rb[xb] * fx;
-        dst[x - x0] += top * (1.0f - fy) + bot * fy;
-    }
 }
 
 void FlareExtras::add_starburst_row(int c, int y, int x0, int x1, float* dst) const

@@ -57,7 +57,7 @@ TRIGGER_KNOBS = ('showPanel', 'lens_file', 'look_name', 'inputChange')
 # header's line.
 SECTION_TITLES = ('Source', 'Source Extraction', 'Matte', 'Ghost', 'Distance',
                   'Camera', 'Aperture', 'Spectral', 'Highlight', 'Haze',
-                  'Starburst', 'Post-process', 'Output')
+                  'Starburst', 'Lens Dirt', 'Post-process', 'Output')
 TICK_SIZE = (18, 3)
 SPECTRUM = ('#ff5a5a', '#ffb340', '#f5ec5b', '#48d17a', '#3ec6ff', '#7b6cff')
 

@@ -190,9 +190,17 @@ public:
     bool        starburst_enable_;
     float       starburst_gain_;
     float       starburst_scale_;
-    bool        output_layers_;            // flare / haze / starburst layers
+    bool        dirt_enable_;              // Lens Dirt
+    float       dirt_gain_;
+    float       dirt_spread_;
+    bool        dirt_ghosts_;              // ghosts light the dirt too
+    bool        output_layers_;            // flare / haze / starburst / dirt layers
     flaresim::LayerSet layers() const
-    { return { output_layers_, haze_enable_, starburst_enable_ }; }
+    { return { output_layers_, haze_enable_, starburst_enable_, dirt_enable_ }; }
+    static constexpr int kDirtInput = 4;
+    // The image on the dirt input, while Lens Dirt is on.
+    Iop* dirt_input() const
+    { return dirt_enable_ ? dynamic_cast<Iop*>(Op::input(kDirtInput)) : nullptr; }
     flaresim::FlareExtras extras_;
 
     int         pupil_jitter_;
@@ -304,6 +312,10 @@ public:
         , starburst_enable_(false)
         , starburst_gain_(100.0f)
         , starburst_scale_(0.15f)
+        , dirt_enable_(false)
+        , dirt_gain_(1.0f)
+        , dirt_spread_(0.4f)
+        , dirt_ghosts_(false)
         , output_layers_(false)
         , pupil_jitter_(0)
         , jitter_seed_(0)
@@ -353,12 +365,13 @@ public:
                "  plate — image to sample source colour from\n"
                "  cam   — scene camera (provides FOV and projection)\n"
                "  light — Axis at the light source position in world space\n"
-               "  matte — optional alpha: white hides the light (see Matte Mode)\n\n"
+               "  matte — optional alpha: white hides the light (see Matte Mode)\n"
+               "  dirt  — optional lens dirt image (turn on Lens Dirt)\n\n"
                "When the source is behind the camera: no flare is produced.\n"
                "When the source is off-screen: Outside Source knobs take over.\n\n"
                "Output: the flare (ghosts, haze and starburst) in RGBA; "
                "Output > Output Layers adds the parts on their own in the "
-               "flare, haze and starburst layers.\n\n"
+               "flare, haze, starburst and dirt layers.\n\n"
                "Merge the flare over the beauty with a Merge (plus) node.";
     }
 
@@ -367,7 +380,7 @@ public:
     // ---- Input handling ----
     // 0: plate (Iop), 1: cam (CameraOp), 2: light (AxisOp), 3: matte (Iop)
 
-    int maximum_inputs() const override { return 4; }
+    int maximum_inputs() const override { return 5; }
     int minimum_inputs() const override { return 3; }
 
     bool test_input(int idx, Op* op) const override
@@ -377,6 +390,7 @@ public:
             case 1: return flaresim::accepts_through_passthrough<CameraOp>(op);
             case 2: return flaresim::accepts_through_passthrough<AxisOp>(op);
             case 3: return dynamic_cast<Iop*>(op) != nullptr;
+            case 4: return dynamic_cast<Iop*>(op) != nullptr;   // dirt
             default: return false;
         }
     }
@@ -384,7 +398,7 @@ public:
     Op* default_input(int idx) const override
     {
         if (idx == 0) return Iop::default_input(idx);
-        return nullptr;   // no sensible default for camera, axis, or mask
+        return nullptr;   // no sensible default for camera, axis, mask or dirt
     }
 
     const char* input_label(int idx, char*) const override
@@ -393,6 +407,7 @@ public:
             case 1: return "cam";
             case 2: return "light";
             case 3: return "matte";
+            case 4: return "dirt";
             default: return "";
         }
     }
@@ -666,6 +681,27 @@ public:
         SetRange(f, 0.01, 0.5);
         Tooltip(f, "Length of the spikes, as a fraction of the image diagonal.");
 
+        Divider(f, "Lens Dirt");
+        Bool_knob(f, &dirt_enable_, "dirt_enable", "Lens Dirt");
+        Tooltip(f, "Dust and smudges on the lens, lit by the lights.  Connect "
+                   "an image to the dirt input: a dirt texture or scan, or "
+                   "Nuke's Noise or Grain for a procedural look.  Reformat it "
+                   "to the plate's format.  Its RGB is how much each pixel "
+                   "of dirt catches the light (0 = clean).\n"
+                   "With Output Layers on, it also comes out in dirt.rgb.");
+        Float_knob(f, &dirt_gain_, "dirt_gain", "Dirt Gain");
+        SetRange(f, 0.0, 5.0);
+        Tooltip(f, "How brightly the dirt lights up.  At 1, dirt of value 1 "
+                   "right next to a light of 8 x 8 pixels shows a quarter of "
+                   "its brightness (with Source Intensity in).");
+        Float_knob(f, &dirt_spread_, "dirt_spread", "Dirt Spread");
+        SetRange(f, 0.05, 1.0);
+        Tooltip(f, "How far across the lens a light lights the dirt, as a "
+                   "fraction of the image diagonal.  Wider is fainter.");
+        Bool_knob(f, &dirt_ghosts_, "dirt_ghosts", "Ghosts Light Dirt");
+        Tooltip(f, "The ghosts light the dirt too, so specks show as a ghost "
+                   "passes over them (scaled by Dirt Gain).");
+
         Divider(f, "Post-process");
         Float_knob(f, &ghost_blur_, "ghost_blur", "Ghost Blur");
         adv_.add(f, Int_knob(f, &ghost_blur_passes_, "ghost_blur_passes", "Ghost Blur Passes"));
@@ -693,6 +729,7 @@ public:
                    "flare.rgb: the ghosts\n"
                    "haze.rgb: the haze (when Haze is on)\n"
                    "starburst.rgb: the starburst (when Starburst is on)\n"
+                   "dirt.rgb: the lens dirt (when Lens Dirt is on)\n"
                    "RGBA is always the whole flare.");
 
         Tab_knob(f, "Surfaces");
@@ -748,6 +785,8 @@ public:
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
             for (const char* name : { "starburst_gain", "starburst_scale" })
                 if (Knob* x = knob(name)) x->enable(starburst_enable_);
+            for (const char* name : { "dirt_gain", "dirt_spread", "dirt_ghosts" })
+                if (Knob* x = knob(name)) x->enable(dirt_enable_);
         };
         if (k->is("showPanel")) {
             // A script saved before Quality existed keeps its own Ray Grid.
@@ -760,7 +799,8 @@ public:
             // fall through
         }
         if (k->is("show_advanced") || k->is("clip_to") ||
-            k->is("haze_enable") || k->is("starburst_enable")) {
+            k->is("haze_enable") || k->is("starburst_enable") ||
+            k->is("dirt_enable")) {
             sync_simple_ui();
             return 1;
         }
@@ -877,6 +917,7 @@ public:
 
         // Validate matte if connected
         if (Op* op = Op::input(3)) op->validate(for_real);
+        if (Iop* d = dirt_input()) d->validate(for_real);
 
         const int x0 = info_.x(), y0 = info_.y();
         const int x1 = info_.r(), y1 = info_.t();
@@ -1192,6 +1233,8 @@ public:
             xc.haze_passes       = haze_passes_;
             xc.starburst_gain    = starburst_enable_ ? starburst_gain_ : 0.0f;
             xc.starburst_scale   = starburst_scale_;
+            xc.dirt_gain         = dirt_input() ? dirt_gain_ : 0.0f;
+            xc.dirt_spread       = dirt_spread_;
             xc.aperture_blades   = aperture_blades_;
             xc.aperture_rotation = aperture_rotation_;
             flaresim::ExtrasFrame xf;
@@ -1393,9 +1436,9 @@ public:
         const size_t row_off   = valid_cache ? (size_t)cache_y * cache_width_ : 0;
         const int    x_off     = info_.x();
 
-        auto write_buf = [&](Channel ch, const uint16_t* buf) {
-            if (!channels.contains(ch)) return;
-            float* dst = row.writable(ch);
+        // Ghost buffer row [x, r) into out[0 .. r - x), black outside it.
+        auto read_buf = [&](float* out, const uint16_t* buf) {
+            float* dst = out - x;       // dst[i] for image column i
             if (!valid_cache || !buf) {
                 for (int i = x; i < r; ++i) dst[i] = 0.0f;
                 return;
@@ -1408,6 +1451,9 @@ public:
                                       dst + x_off + xi_first,
                                       xi_last - xi_first);
             for (int i = std::max(x, x_off + xi_last); i < r; ++i) dst[i] = 0.0f;
+        };
+        auto write_buf = [&](Channel ch, const uint16_t* buf) {
+            if (channels.contains(ch)) read_buf(row.writable(ch) + x, buf);
         };
 
         write_buf(Chan_Red,   ghost_r_);
@@ -1422,9 +1468,31 @@ public:
             write_buf(l.flare[2], ghost_b_);
         }
 
-        // Haze and starburst on top of the ghosts, and the layers.
+        // Lens dirt: the dirt input's row, and the ghosts when they light it.
+        flaresim::DirtRow dirt;
+        Row dirt_in(x, r);
+        std::vector<float> dirt_ghost[3];
+        if (Iop* d = dirt_input()) {
+            if (valid_cache) {
+                d->get(y, x, r, Mask_RGB, dirt_in);
+                dirt.dirt[0] = dirt_in[Chan_Red];
+                dirt.dirt[1] = dirt_in[Chan_Green];
+                dirt.dirt[2] = dirt_in[Chan_Blue];
+                if (dirt_ghosts_) {
+                    const uint16_t* bufs[3] = { ghost_r_, ghost_g_, ghost_b_ };
+                    for (int c = 0; c < 3; ++c) {
+                        dirt_ghost[c].assign(r - x, 0.0f);
+                        read_buf(dirt_ghost[c].data(), bufs[c]);
+                        dirt.ghost[c] = dirt_ghost[c].data();
+                    }
+                    dirt.ghost_gain = dirt_gain_;
+                }
+            }
+        }
+
+        // Haze, starburst and dirt on top of the ghosts, and the layers.
         flaresim::finish_row(extras_, on, valid_cache ? cache_y : -1,
-                             x, r, x_off, channels, row);
+                             x, r, x_off, dirt, channels, row);
     }
 
     // ---- _request ----
@@ -1439,6 +1507,9 @@ public:
         if (Op* op = Op::input(3)) {
             flaresim::request_matte(dynamic_cast<Iop*>(op), count);
         }
+
+        // The dirt, for the rows asked for.
+        if (Iop* d = dirt_input()) d->request(x, y, r, t, Mask_RGB, count);
 
         // Don't request from camera (input 1) or axis (input 2) —
         // they provide transforms, not pixels.

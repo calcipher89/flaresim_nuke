@@ -72,15 +72,16 @@ A light that goes behind a foreground object stops flaring. Connect a roto, or t
 - Lights outside the frame are not affected, unless the matte's bbox reaches them (the overscan of an undistorted plate).
 - The flare fades as a whole; a real half-hidden light would also change the flare's shape, which this does not simulate.
 
-### Haze, Starburst and Output Layers
+### Haze, Starburst, Lens Dirt and Output Layers
 
 Two light effects from the original FlareSim are back, on both FlareSim and FlareSim3D. Each has its own checkbox, off by default, so existing scripts render as before.
 
 - **Haze** — veiling glare: a wide soft glow around each light from light scattered inside the lens. It carries the light's energy, so brighter and bigger lights give more haze and a wider haze is fainter. **Haze Gain** defaults to 0.1; try 0.05 to 0.2. **Haze Radius** (fraction of the diagonal, default 0.15) and **Haze Passes** are under Show Advanced.
 - **Starburst** — diffraction spikes from the iris at the brightest lights (up to 32). **Starburst Gain** uses the original FlareSim's scale: typical 50 to 500, default 100. The shape comes from **Aperture Blades** and **Aperture Rotation**: 6 blades give 6 spikes, an odd count twice as many, 0 a round iris with soft rings. Red spreads wider than blue. **Starburst Size** is under Show Advanced.
 - Both follow the occlusion matte and Source Intensity, since they are built from the same lights as the ghosts, and their sizes use the same diagonal as Ghost Blur.
-- **Output Layers** (Output section, off by default) — also outputs the parts on their own: `flare.rgb` (ghosts), plus `haze.rgb` while Haze is on and `starburst.rgb` while Starburst is on, for grading them separately. RGBA is always the whole flare.
-- Looks save the haze and starburst settings.
+- **Output Layers** (Output section, off by default) — also outputs the parts on their own: `flare.rgb` (ghosts), plus `haze.rgb` while Haze is on and `starburst.rgb` while Starburst is on, and `dirt.rgb` while Lens Dirt is on, for grading them separately. RGBA is always the whole flare.
+- **Lens Dirt** — dust and smudges on the lens, lit by the lights. Connect an image to the **dirt** input (input 3 on FlareSim, input 4 on FlareSim3D): a dirt texture or scan, or Nuke's Noise or Grain for a procedural look, reformatted to the plate's format. Its RGB is how much each pixel catches the light. The node spreads each light's glow wide across the frame (**Dirt Spread**, default 0.4 of the diagonal) and multiplies the dirt by it, so dirt near a light glows and dirt far from any light stays dark. **Dirt Gain** (default 1) sets how bright; **Ghosts Light Dirt** lets the ghosts light it too. With Output Layers on it also comes out in `dirt.rgb`.
+- Looks save the haze, starburst and dirt settings (not whether Lens Dirt is on, since that needs a dirt image).
 - Not yet in the Lens Browser preview, and the macOS (Metal) build doesn't have them yet.
 
 ### Spectral Jitter
@@ -402,7 +403,7 @@ Abbe number controls dispersion (rainbow color spread). Lower Abbe → more spec
 
 ## Future Ideas
 
-1. **Starburst as a separate node** — a standalone diffraction spike generator with more controls, decoupled from the ghost renderer (the node now has a built-in starburst; see Haze, Starburst and Output Layers).
+1. **Starburst as a separate node** — a standalone diffraction spike generator with more controls, decoupled from the ghost renderer (the node now has a built-in starburst; see Haze, Starburst, Lens Dirt and Output Layers).
 
 ---
 

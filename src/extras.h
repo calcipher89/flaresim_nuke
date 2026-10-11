@@ -8,6 +8,9 @@
 //   Haze       a wide soft glow around each light: its light spread out by
 //              a blur.  Kept at a lower resolution (it's a blur) and
 //              sampled back up row by row.
+//   Dirt light the light that reaches dust and smudges on the front of the
+//              lens: a very wide glow of each light.  The node multiplies
+//              it by the dirt image, so specks near a light glow.
 //   Starburst  the aperture's Fraunhofer diffraction pattern (the squared
 //              magnitude of the FFT of the iris shape) drawn at each light,
 //              wider in red than in blue as in a real lens.
@@ -40,6 +43,8 @@ struct ExtrasConfig
     int   aperture_blades  = 0;      // 0 = round (no spikes, Airy rings)
     float aperture_rotation = 0.0f;  // degrees
     int   max_starbursts   = 32;     // brightest lights that get spikes
+    float dirt_gain        = 0.0f;   // 0 = off: light falling on lens dirt
+    float dirt_spread      = 0.4f;   // how far it reaches, fraction of the diagonal
 };
 
 // Where the lights are.  Lights are stored as angles (BrightPixel); these
@@ -57,6 +62,24 @@ struct ExtrasFrame
     float light_scale = 1.0f;        // light colour = BrightPixel rgb * this
 };
 
+// A wide glow of the lights, kept at low resolution (it's a blur) and
+// sampled back up row by row.  Used for the haze and for the light that
+// falls on lens dirt.
+struct GlowField
+{
+    std::vector<float> ch[3];
+    int w = 0, h = 0, ds = 1, pad = 0;
+
+    // Energy-conserving: Gain 1 gives ref_peak of a light of 8 x 8 pixels
+    // at radius ref_radius; a wider glow is fainter.
+    void compute(float gain, float radius, int passes, float ref_radius,
+                 float ref_peak, const ExtrasFrame& frame,
+                 const std::vector<BrightPixel>& lights);
+    void clear();
+    bool empty() const { return ch[0].empty(); }
+    void add_row(int c, int y, int x0, int x1, float* dst) const;
+};
+
 class FlareExtras
 {
 public:
@@ -65,24 +88,26 @@ public:
                  const std::vector<BrightPixel>& lights);
     void clear();
 
-    bool has_haze()      const { return !haze_[0].empty(); }
+    bool has_haze()      const { return !haze_.empty(); }
     bool has_starburst() const { return !star_[0].empty(); }
-    bool empty()         const { return !has_haze() && !has_starburst(); }
+    bool has_dirt()      const { return !dirt_.empty(); }
+    bool empty()         const { return !has_haze() && !has_starburst() && !has_dirt(); }
 
     // Add (or write) channel c (0 R, 1 G, 2 B) of buffer row y, columns
     // x0..x1 (buffer coordinates) to dst[0 .. x1 - x0).
-    void add_haze_row     (int c, int y, int x0, int x1, float* dst) const;
+    void add_haze_row     (int c, int y, int x0, int x1, float* dst) const
+    { haze_.add_row(c, y, x0, x1, dst); }
+    // The light reaching the lens dirt (multiply by the dirt image).
+    void add_dirt_light_row(int c, int y, int x0, int x1, float* dst) const
+    { dirt_.add_row(c, y, x0, x1, dst); }
     void add_starburst_row(int c, int y, int x0, int x1, float* dst) const;
 
 private:
-    void compute_haze(const ExtrasConfig& cfg, const ExtrasFrame& frame,
-                      const std::vector<BrightPixel>& lights);
     void compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& frame,
                            const std::vector<BrightPixel>& lights);
 
-    // Haze at 1/haze_ds_ resolution.
-    std::vector<float> haze_[3];
-    int haze_w_ = 0, haze_h_ = 0, haze_ds_ = 1, haze_pad_ = 0;
+    GlowField haze_;
+    GlowField dirt_;      // light on the lens dirt
 
     // Starburst at full resolution.
     std::vector<float> star_[3];

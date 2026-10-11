@@ -114,6 +114,20 @@ int main(int argc, char** argv)
     check(best > 20.0f * worst, "six blades give spikes", best / std::max(worst, 1e-12f));
     if (argc > 1) write_ppm(std::string(argv[1]) + "/starburst.ppm", fx, w, h, false);
 
+    // Dirt light: wide, reaches the far side of the frame, peaks at
+    // kDirtRefPeak (0.25) at Gain 1 and the default spread.
+    cfg.starburst_gain = 0.0f;
+    cfg.dirt_gain = 1.0f;
+    fx.compute(cfg, fr, lights);
+    check(fx.has_dirt() && !fx.has_starburst(), "dirt light only", 0);
+    row.assign(w, 0.0f);
+    fx.add_dirt_light_row(1, h / 2, 0, w, row.data());
+    float dpeak = 0.0f;
+    for (float v : row) dpeak = std::max(dpeak, v);
+    check(std::fabs(dpeak - 0.25f) < 0.04f, "dirt light peaks at a quarter", dpeak);
+    check(row[w / 2 + 300] > 0.2f * dpeak, "dirt light reaches far", row[w / 2 + 300]);
+    cfg.dirt_gain = 0.0f;
+
     // Nothing to draw without lights.
     fx.compute(cfg, fr, {});
     check(fx.empty(), "no lights, nothing drawn", 0);
