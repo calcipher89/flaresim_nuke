@@ -30,6 +30,7 @@ constexpr float kRefPeak      = 0.1f;
 constexpr float kDirtRefRadius = 0.4f;
 constexpr float kDirtRefPeak   = 0.25f;
 constexpr int   kPsfSize      = 512;
+constexpr float kDefocusRadius = 6.0f;   // low-res blob radius the dirt defocus keeps
 constexpr int   kHazeMinRadius = 12;     // low-res blur radius the haze keeps
 // Starburst Gain unit.  The original FlareSim drew the plate's own values
 // times the gain; lights here carry Source Intensity (default 8), so a gain
@@ -75,27 +76,35 @@ void fft2d(std::vector<std::complex<float>>& grid, int n)
 
 // Same round / polygon test as the pupil sampler in ghost_cuda.cu, so the
 // spikes match the iris the ghosts are traced through.
+struct Iris
+{
+    float rot, apothem, sector;
+    bool polygon;
+    Iris(int blades, float rot_deg)
+        : rot(rot_deg * (float)M_PI / 180.0f),
+          apothem(blades >= 3 ? std::cos((float)M_PI / blades) : 1.0f),
+          sector(blades >= 3 ? 2.0f * (float)M_PI / blades : 1.0f),
+          polygon(blades >= 3) {}
+    // (u, v) in [-1, 1]: inside the iris?
+    bool inside(float u, float v) const
+    {
+        const float r2 = u * u + v * v;
+        if (r2 > 1.0f) return false;
+        if (!polygon) return true;
+        float s = std::fmod(std::atan2(v, u) - rot, sector);
+        if (s < 0.0f) s += sector;
+        return std::sqrt(r2) * std::cos(s - sector * 0.5f) <= apothem;
+    }
+};
+
 void aperture_mask(std::vector<float>& mask, int n, int blades, float rot_deg)
 {
     mask.assign((size_t)n * n, 0.0f);
-    const float rot     = rot_deg * (float)M_PI / 180.0f;
-    const bool  polygon = blades >= 3;
-    const float apothem = polygon ? std::cos((float)M_PI / blades) : 1.0f;
-    const float sector  = polygon ? 2.0f * (float)M_PI / blades : 1.0f;
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            const float u  = ((c + 0.5f) / n) * 2.0f - 1.0f;
-            const float v  = ((r + 0.5f) / n) * 2.0f - 1.0f;
-            const float r2 = u * u + v * v;
-            if (r2 > 1.0f) continue;
-            if (polygon) {
-                float s = std::fmod(std::atan2(v, u) - rot, sector);
-                if (s < 0.0f) s += sector;
-                if (std::sqrt(r2) * std::cos(s - sector * 0.5f) > apothem) continue;
-            }
-            mask[(size_t)r * n + c] = 1.0f;
-        }
-    }
+    const Iris iris(blades, rot_deg);
+    for (int r = 0; r < n; ++r)
+        for (int c = 0; c < n; ++c)
+            if (iris.inside(((c + 0.5f) / n) * 2.0f - 1.0f, ((r + 0.5f) / n) * 2.0f - 1.0f))
+                mask[(size_t)r * n + c] = 1.0f;
 }
 
 struct LightPos { float x, y, r, g, b; };
@@ -189,6 +198,9 @@ void FlareExtras::clear()
 {
     haze_.clear();
     dirt_.clear();
+    scatter_.clear();
+    for (int c = 0; c < 3; ++c) dirt_img_[c].clear();
+    dirt_w_ = dirt_h_ = 0;
     for (int c = 0; c < 3; ++c) star_[c].clear();
     star_w_ = star_h_ = 0;
 }
@@ -295,6 +307,123 @@ void GlowField::add_row(int c, int y, int x0, int x1, float* dst) const
         const float bot = rb[xa] * (1.0f - fx) + rb[xb] * fx;
         dst[x - x0] += top * (1.0f - fy) + bot * fy;
     }
+}
+
+void defocus_inplace(float* img, int w, int h, float radius, int blades, float rotation_deg)
+{
+    if (radius < 0.75f || w <= 0 || h <= 0) return;
+    // A defocused speck is a soft blob, so the blob can be worked at a
+    // lower resolution: keep its radius around kDefocusRadius low-res pixels.
+    const int ds = std::max(1, (int)(radius / kDefocusRadius));
+    const int lw = (w + ds - 1) / ds, lh = (h + ds - 1) / ds;
+    std::vector<float> lo((size_t)lw * lh, 0.0f), cnt((size_t)lw * lh, 0.0f);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const size_t i = (size_t)(y / ds) * lw + x / ds;
+            lo[i] += img[(size_t)y * w + x];
+            cnt[i] += 1.0f;
+        }
+    for (size_t i = 0; i < lo.size(); ++i) lo[i] /= std::max(cnt[i], 1.0f);
+
+    // The blob: the iris shape, supersampled 4 x 4 for soft edges.
+    const float kr = std::max(radius / ds, 1.0f);
+    const int   kn = (int)std::ceil(kr);
+    const Iris iris(blades, rotation_deg);
+    struct Tap { int dx, dy; float w; };
+    std::vector<Tap> taps;
+    float total = 0.0f;
+    for (int dy = -kn; dy <= kn; ++dy)
+        for (int dx = -kn; dx <= kn; ++dx) {
+            int in = 0;
+            for (int sy = 0; sy < 4; ++sy)
+                for (int sx = 0; sx < 4; ++sx)
+                    in += iris.inside((dx + (sx + 0.5f) / 4 - 0.5f) / kr,
+                                      (dy + (sy + 0.5f) / 4 - 0.5f) / kr);
+            if (in) { taps.push_back({dx, dy, in / 16.0f}); total += in / 16.0f; }
+        }
+    for (Tap& t : taps) t.w /= total;
+
+    std::vector<float> out((size_t)lw * lh, 0.0f);
+    for (int y = 0; y < lh; ++y)
+        for (int x = 0; x < lw; ++x) {
+            float acc = 0.0f;
+            for (const Tap& t : taps) {
+                const int sx = std::clamp(x + t.dx, 0, lw - 1);
+                const int sy = std::clamp(y + t.dy, 0, lh - 1);
+                acc += lo[(size_t)sy * lw + sx] * t.w;
+            }
+            out[(size_t)y * lw + x] = acc;
+        }
+
+    if (ds == 1) { std::copy(out.begin(), out.end(), img); return; }
+    // Back up to full resolution, bilinear.
+    for (int y = 0; y < h; ++y) {
+        const float gy = (y + 0.5f) / ds - 0.5f;
+        const int iy = (int)std::floor(gy);
+        const float fy = gy - iy;
+        const int ya = std::clamp(iy, 0, lh - 1), yb = std::clamp(iy + 1, 0, lh - 1);
+        for (int x = 0; x < w; ++x) {
+            const float gx = (x + 0.5f) / ds - 0.5f;
+            const int ix = (int)std::floor(gx);
+            const float fx = gx - ix;
+            const int xa = std::clamp(ix, 0, lw - 1), xb = std::clamp(ix + 1, 0, lw - 1);
+            const float top = out[(size_t)ya * lw + xa] * (1 - fx) + out[(size_t)ya * lw + xb] * fx;
+            const float bot = out[(size_t)yb * lw + xa] * (1 - fx) + out[(size_t)yb * lw + xb] * fx;
+            img[(size_t)y * w + x] = top * (1 - fy) + bot * fy;
+        }
+    }
+}
+
+void FlareExtras::set_dirt(const DirtLook& look, const ExtrasFrame& f,
+                           std::vector<float> rgb[3])
+{
+    for (int c = 0; c < 3; ++c) dirt_img_[c].clear();
+    scatter_.clear();
+    const int w = f.buf_w, h = f.buf_h;
+    const size_t npx = (size_t)w * h;
+    if (w <= 0 || h <= 0) return;
+    for (int c = 0; c < 3; ++c)
+        if (rgb[c].size() != npx) return;
+    const float diag = f.diag > 0.0f ? f.diag : std::sqrt((float)w * w + (float)h * h);
+
+    for (int c = 0; c < 3; ++c) {
+        dirt_img_[c].swap(rgb[c]);
+        for (float& v : dirt_img_[c]) v = std::max(v, 0.0f);
+        defocus_inplace(dirt_img_[c].data(), w, h, std::max(look.softness, 0.0f) * diag,
+                        look.aperture_blades, look.aperture_rotation);
+    }
+    dirt_w_ = w;  dirt_h_ = h;
+
+    // The veil: the light on the dirt, spread wide.  It carries
+    // look.scatter of the dirt's light (the blur keeps the total), so
+    // it's faint next to the specks but covers far more of the frame.
+    if (look.scatter <= 0.0f || dirt_.empty()) return;
+    const int radius_px = std::max(1, (int)std::lround(std::max(look.scatter_radius, 0.0f) * diag));
+    const int ds = std::max(1, radius_px / kHazeMinRadius);
+    const int lr = std::max(1, (int)std::lround((float)radius_px / ds));
+    const int lw = (w + ds - 1) / ds, lh = (h + ds - 1) / ds;
+    const float cell = 1.0f / ((float)ds * ds);
+    std::vector<float> light(w), tmp;
+    for (int c = 0; c < 3; ++c) {
+        std::vector<float>& g = scatter_.ch[c];
+        g.assign((size_t)lw * lh, 0.0f);
+        for (int y = 0; y < h; ++y) {
+            std::fill(light.begin(), light.end(), 0.0f);
+            dirt_.add_row(c, y, 0, w, light.data());
+            const float* d = dirt_img_[c].data() + (size_t)y * w;
+            float* gr = g.data() + (size_t)(y / ds) * lw;
+            for (int x = 0; x < w; ++x) gr[x / ds] += d[x] * light[x] * cell;
+        }
+        box_blur_inplace(g.data(), lw, lh, lr, 3, tmp, /*zero_edges=*/true);
+        for (float& v : g) v *= look.scatter;
+    }
+    scatter_.w = lw;  scatter_.h = lh;  scatter_.ds = ds;  scatter_.pad = 0;
+}
+
+const float* FlareExtras::dirt_row(int c, int y) const
+{
+    if (!has_dirt_image() || c < 0 || c > 2 || y < 0 || y >= dirt_h_) return nullptr;
+    return dirt_img_[c].data() + (size_t)y * dirt_w_;
 }
 
 void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& f,

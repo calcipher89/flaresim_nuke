@@ -126,6 +126,37 @@ int main(int argc, char** argv)
     for (float v : row) dpeak = std::max(dpeak, v);
     check(std::fabs(dpeak - 0.25f) < 0.04f, "dirt light peaks at a quarter", dpeak);
     check(row[w / 2 + 300] > 0.2f * dpeak, "dirt light reaches far", row[w / 2 + 300]);
+
+    // Dirt: one speck, defocused into a blob; the blob keeps its total and
+    // is round-ish, wider than the speck.
+    {
+        std::vector<float> img[3];
+        for (int c = 0; c < 3; ++c) {
+            img[c].assign((size_t)w * h, 0.0f);
+            img[c][(size_t)(h / 2) * w + w / 2 + 100] = 1.0f;
+        }
+        DirtLook look;
+        look.softness = 0.01f;   // ~11 px at this size
+        look.scatter = 0.5f;
+        fx.set_dirt(look, fr, img);
+        check(fx.has_dirt_image() && fx.has_scatter(), "dirt image and scatter", 0);
+        double total = 0.0;
+        int lit = 0;
+        for (int y = 0; y < h; ++y) {
+            const float* d = fx.dirt_row(1, y);
+            for (int x = 0; x < w; ++x) { total += d[x]; lit += d[x] > 1e-4f; }
+        }
+        check(std::fabs(total - 1.0) < 0.05, "defocus keeps the speck's total", (float)total);
+        check(lit > 200, "defocus spreads the speck into a blob", (float)lit);
+        std::vector<float> sc(w, 0.0f);
+        fx.add_scatter_row(1, h / 2, 0, w, sc.data());
+        const float near = sc[w / 2 + 100], far = sc[w / 2 + 100 + 60];
+        check(near > 0.0f && far > 0.1f * near && far < near, "scatter is a wide soft veil", far / std::max(near, 1e-12f));
+        std::vector<float> light(w, 0.0f);
+        fx.add_dirt_light_row(1, h / 2, 0, w, light.data());
+        const float speck = fx.dirt_row(1, h / 2)[w / 2 + 100] * light[w / 2 + 100];
+        check(near < speck, "veil is fainter than the lit speck", near / std::max(speck, 1e-12f));
+    }
     cfg.dirt_gain = 0.0f;
 
     // Nothing to draw without lights.

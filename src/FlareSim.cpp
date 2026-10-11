@@ -287,6 +287,8 @@ public:
     bool        dirt_enable_;              // Lens Dirt
     float       dirt_gain_;
     float       dirt_spread_;
+    float       dirt_softness_;            // defocus of the dirt
+    float       dirt_scatter_;             // veil the dirt scatters
     bool        dirt_ghosts_;              // ghosts light the dirt too
     bool        output_layers_;            // flare / haze / starburst / dirt layers
     flaresim::LayerSet layers() const
@@ -455,6 +457,8 @@ public:
         , dirt_enable_(false)
         , dirt_gain_(1.0f)
         , dirt_spread_(0.4f)
+        , dirt_softness_(0.01f)
+        , dirt_scatter_(0.5f)
         , dirt_ghosts_(false)
         , output_layers_(false)
         , pupil_jitter_(0)
@@ -997,6 +1001,19 @@ public:
         SetRange(f, 0.05, 1.0);
         Tooltip(f, "How far across the lens a light lights the dirt, as a "
                    "fraction of the image diagonal.  Wider is fainter.");
+        Float_knob(f, &dirt_softness_, "dirt_softness", "Dirt Softness");
+        SetRange(f, 0.0, 0.05);
+        Tooltip(f, "Defocus of the dirt, as a fraction of the image diagonal.  "
+                   "Dirt sits on the front element, far out of focus, so "
+                   "specks show as soft blobs the shape of the iris (Aperture "
+                   "Blades).  A real lens shows bigger, fainter blobs wide "
+                   "open and smaller, crisper ones stopped down.  0 = the "
+                   "dirt image as it is.");
+        Float_knob(f, &dirt_scatter_, "dirt_scatter", "Dirt Scatter");
+        SetRange(f, 0.0, 2.0);
+        Tooltip(f, "Light the dirt scatters into a soft veil around it, so "
+                   "dirty areas near a light go hazy and lose contrast once "
+                   "the flare is merged over the plate.  0 = no veil.");
         Bool_knob(f, &dirt_ghosts_, "dirt_ghosts", "Ghosts Light Dirt");
         Tooltip(f, "The ghosts light the dirt too, so specks show as a ghost "
                    "passes over them (scaled by Dirt Gain).");
@@ -1105,7 +1122,8 @@ public:
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
             for (const char* name : { "starburst_gain", "starburst_scale" })
                 if (Knob* x = knob(name)) x->enable(starburst_enable_);
-            for (const char* name : { "dirt_gain", "dirt_spread", "dirt_ghosts" })
+            for (const char* name : { "dirt_gain", "dirt_spread", "dirt_softness",
+                                      "dirt_scatter", "dirt_ghosts" })
                 if (Knob* x = knob(name)) x->enable(dirt_enable_);
         };
         if (k->is("showPanel")) {
@@ -1730,6 +1748,27 @@ public:
                                                  : std::max(light_size_, 1.0f);
             xf.light_scale = 1.0f / 1000.0f;   // sources carry Source Intensity x 1000
             extras_.compute(xc, xf, sources);
+
+            // The lens dirt, read over the whole buffer: softening it
+            // needs its neighbours.
+            if (Iop* d = dirt_input()) {
+                std::vector<float> img[3];
+                for (int c = 0; c < 3; ++c) img[c].assign(npx, 0.0f);
+                Row drow(x0, std::max(x0 + w, x0 + 1));
+                for (int by = 0; by < h; ++by) {
+                    d->get(y0 + by, x0, x0 + w, Mask_RGB, drow);
+                    if (Op::aborted()) { zero_buffers(); return; }
+                    const float* src[3] = { drow[Chan_Red], drow[Chan_Green], drow[Chan_Blue] };
+                    for (int c = 0; c < 3; ++c)
+                        std::copy(src[c] + x0, src[c] + x0 + w, img[c].begin() + (size_t)by * w);
+                }
+                flaresim::DirtLook look;
+                look.softness          = dirt_softness_;
+                look.scatter           = dirt_scatter_;
+                look.aperture_blades   = aperture_blades_;
+                look.aperture_rotation = aperture_rotation_;
+                extras_.set_dirt(look, xf, img);
+            }
         }
         PROF_END();
 
@@ -1972,26 +2011,17 @@ public:
             write_buf(l.flare[2], ghost_b_);
         }
 
-        // Lens dirt: the dirt input's row, and the ghosts when they light it.
+        // Lens dirt: the ghosts of this row, when they light it.
         flaresim::DirtRow dirt;
-        Row dirt_in(x, r);
         std::vector<float> dirt_ghost[3];
-        if (Iop* d = dirt_input()) {
-            if (valid_cache) {
-                d->get(y, x, r, Mask_RGB, dirt_in);
-                dirt.dirt[0] = dirt_in[Chan_Red];
-                dirt.dirt[1] = dirt_in[Chan_Green];
-                dirt.dirt[2] = dirt_in[Chan_Blue];
-                if (dirt_ghosts_) {
-                    const uint16_t* bufs[3] = { ghost_r_, ghost_g_, ghost_b_ };
-                    for (int c = 0; c < 3; ++c) {
-                        dirt_ghost[c].assign(r - x, 0.0f);
-                        read_buf(dirt_ghost[c].data(), bufs[c]);
-                        dirt.ghost[c] = dirt_ghost[c].data();
-                    }
-                    dirt.ghost_gain = dirt_gain_;
-                }
+        if (dirt_ghosts_ && valid_cache && extras_.has_dirt_image()) {
+            const uint16_t* bufs[3] = { ghost_r_, ghost_g_, ghost_b_ };
+            for (int c = 0; c < 3; ++c) {
+                dirt_ghost[c].assign(r - x, 0.0f);
+                read_buf(dirt_ghost[c].data(), bufs[c]);
+                dirt.ghost[c] = dirt_ghost[c].data();
             }
+            dirt.ghost_gain = dirt_gain_;
         }
 
         // Haze, starburst and dirt on top of the ghosts, and the layers.
@@ -2030,8 +2060,9 @@ public:
         // If a matte is connected, request its alpha over its whole bbox.
         flaresim::request_matte(input(1), count);
 
-        // The dirt, for the rows asked for.
-        if (Iop* d = dirt_input()) d->request(x, y, r, t, Mask_RGB, count);
+        // The dirt, over the whole output (it is softened as a whole).
+        if (Iop* d = dirt_input())
+            d->request(info_.x(), info_.y(), info_.r(), info_.t(), Mask_RGB, count);
 
         // Pass non-RGBA channels through for the requested region only.
         ChannelSet passthru(channels);

@@ -80,6 +80,16 @@ struct GlowField
     void add_row(int c, int y, int x0, int x1, float* dst) const;
 };
 
+// How the lens dirt image is treated before the light reaches it.
+struct DirtLook
+{
+    float softness  = 0.01f;   // defocus radius, fraction of the diagonal; 0 = sharp
+    float scatter   = 0.0f;    // share of the dirt's light spread into a soft veil
+    float scatter_radius = 0.08f;  // how far the veil spreads, fraction of the diagonal
+    int   aperture_blades = 0;     // blob shape: the iris (0 = round)
+    float aperture_rotation = 0.0f;
+};
+
 class FlareExtras
 {
 public:
@@ -91,7 +101,23 @@ public:
     bool has_haze()      const { return !haze_.empty(); }
     bool has_starburst() const { return !star_[0].empty(); }
     bool has_dirt()      const { return !dirt_.empty(); }
-    bool empty()         const { return !has_haze() && !has_starburst() && !has_dirt(); }
+    bool has_dirt_image() const { return !dirt_img_[0].empty(); }
+    bool has_scatter()   const { return !scatter_.empty(); }
+    bool empty()         const { return !has_haze() && !has_starburst() && !has_dirt()
+                                        && !has_scatter(); }
+
+    // Lens dirt: the dirt image for the whole buffer (buf_w x buf_h per
+    // channel, row 0 at the bottom), defocused into soft blobs the shape
+    // of the iris, and the veil the dirt scatters from the light on it.
+    // Call after compute(); takes the image.
+    void set_dirt(const DirtLook& look, const ExtrasFrame& frame,
+                  std::vector<float> rgb[3]);
+    // Channel c of the softened dirt for buffer row y (buf_w values), or
+    // null when there is no dirt image.
+    const float* dirt_row(int c, int y) const;
+    int dirt_width() const { return dirt_w_; }
+    void add_scatter_row(int c, int y, int x0, int x1, float* dst) const
+    { scatter_.add_row(c, y, x0, x1, dst); }
 
     // Add (or write) channel c (0 R, 1 G, 2 B) of buffer row y, columns
     // x0..x1 (buffer coordinates) to dst[0 .. x1 - x0).
@@ -108,6 +134,9 @@ private:
 
     GlowField haze_;
     GlowField dirt_;      // light on the lens dirt
+    std::vector<float> dirt_img_[3];   // softened dirt image, full res
+    int dirt_w_ = 0, dirt_h_ = 0;
+    GlowField scatter_;   // veil scattered by the lit dirt
 
     // Starburst at full resolution.
     std::vector<float> star_[3];
@@ -119,6 +148,10 @@ private:
     int   psf_blades_ = -1;
     float psf_rotation_ = 0.0f;
 };
+
+// Defocus an image (in place) with a blob the shape of the iris, radius
+// in pixels.  Worked at a lower resolution for big radii.
+void defocus_inplace(float* img, int w, int h, float radius, int blades, float rotation_deg);
 
 // The aperture's diffraction pattern: n x n, centre at (n/2, n/2), peak 1.
 // n must be a power of two.
