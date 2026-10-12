@@ -141,7 +141,9 @@ Same lens (Angenieux 180mm, 15 surfaces, 66 active pairs), same frame, same mach
 |---|---|---|---|
 | **Linux** | CUDA (sm_70+) | 14–17 | Supported — local or Docker (ASWF) builds |
 | **Windows** | CUDA (sm_70+) | 14–17 | Supported — Ninja + MSVC (VS 2019 toolset), see [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md) |
-| **macOS** | Metal (Apple Silicon) | 15–17 | Supported |
+| **macOS** | Metal (Apple Silicon) | 15–17 | Behind: missing the newest features (see below), not yet tested with FlareSim+. See [docs/BUILD_MACOS.md](docs/BUILD_MACOS.md) |
+
+**macOS is behind Linux and Windows.** The Mac nodes don't have haze, starburst, lens dirt, output layers, or Auto Detect's Source Cap and Cluster Radius yet, and the Mac build hasn't been tested since the FlareSim+ changes. The Lens Browser, looks, the simple panel, the camera input, mattes and the panel header are there. Looks that use the missing features still load; the Mac just doesn't draw those parts. A Mac port is planned but not scheduled.
 
 Pre-built plugins are published as zips on the GitHub Releases page, one per Nuke version and OS. They are no longer committed to the repository.
 
@@ -180,7 +182,8 @@ The build handles these automatically:
 - **CUDA architectures** are chosen from the installed nvcc (12.8+ adds Blackwell sm_100/sm_120). Override with `-DCMAKE_CUDA_ARCHITECTURES="86;89"`.
 - **libstdc++ ABI**: Nuke 14 on Linux needs `_GLIBCXX_USE_CXX11_ABI=0` (per Foundry's NDK guide); it is set from `NUKE_VERSION`.
 - **CUDA runtime** is linked statically, so users need only an NVIDIA driver ≥ 525.
-- **Linux build for a studio**: see [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md).
+- **Linux build for a studio**: see [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) (from Windows with WSL2, or on a Linux machine).
+- **macOS build**: see [docs/BUILD_MACOS.md](docs/BUILD_MACOS.md).
 
 ### Building every Nuke version at once
 
