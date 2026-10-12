@@ -13,8 +13,9 @@ So FlareSim+ keeps the physics and the speed, and puts an artist-friendly layer 
 ## What's New
 
 ### FlareSim+ Panel Header
+<img width="519" height="1029" alt="image" src="https://github.com/user-attachments/assets/e564b428-d2d1-4ec2-8d62-34914afe8418" />
 
-The FlareSim tab opens with a FlareSim+ header: the wordmark with its spectral line, and a card for the node's lens showing a small render of its look, the lens name, the look name, and the focal length (the connected camera's, or the lens's own with its f-stop). It updates when the panel opens and when the lens, the look or the inputs change. The look thumbnail is the Lens Browser's preview, saved when you click **Apply to Node**; headers are cached in `~/.nuke/FlareSim/headers`. The header stretches to the panel's width, section titles carry a matching spectral tick, and a floating panel is sized to the tab you're on.
+The FlareSim tab opens with a FlareSim+ header and a lens card showing a thumbnail of the look, the lens name, the look name and the focal length. It updates on its own when you change the lens, the look or the camera.
 
 That styling works on Nuke's own panel widgets, only while a FlareSim panel is open. If it ever causes trouble, turn it off with `os.environ['FLARESIM_PANEL_STYLE'] = '0'` in `init.py` (or `FlareSim_Header.PANEL_STYLE = False` in `menu.py`): you get Nuke's plain panel, and the header still shows at a fixed size and updates the next time the panel opens.
 
@@ -248,6 +249,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 6. If the light passes behind something, connect a matte of it to the **matte** input (see Occlusion Matte).
 
 ### Lens Browser
+<img width="2558" height="1388" alt="image" src="https://github.com/user-attachments/assets/9fb82657-defe-4278-96b5-f086ec3e24f2" />
 
 The **Lens Browser** button on a FlareSim or FlareSim3D node opens a window for picking a lens and building a look before you render:
 
@@ -402,8 +404,7 @@ Abbe number controls dispersion (rainbow color spread). Lower Abbe → more spec
 
 
 ## Future Ideas
-
-1. **Starburst as a separate node** — a standalone diffraction spike generator with more controls, decoupled from the ghost renderer (the node now has a built-in starburst; see Haze, Starburst, Lens Dirt and Output Layers).
+--- n/a
 
 ---
 
@@ -413,7 +414,9 @@ FlareSim is built on the foundational work of **Steve Watts Kennedy** ([LocalSta
 
 The original physics engine is based on the work of **Eamonn Nugent** ([@space55](https://github.com/space55) · [55.dev](https://55.dev/)), whose CPU-based renderer ([blackhole-rt](https://github.com/space55/blackhole-rt/)) provided the ray-tracing foundation.
 
-FlareSim+ is **Jeff Baldemoro**'s artist-focused overhaul of this fork: the Lens Browser, looks, the simpler node panel with Quality presets, placed lights, occlusion mattes, overscan, the camera input and the FlareSim+ panel header.
+**Peter Mercell** ([petermercell/flaresim_nuke](https://github.com/petermercell/flaresim_nuke)) made it fast and portable: the optimised GPU pipeline, Linux and macOS builds, Nuke 14–17 support, anamorphic lenses, FlareSim3D, and per-surface art direction.
+
+FlareSim+ is **Jeff Baldemoro**'s artist-focused overhaul built on Peter's fork: the Lens Browser, looks, the simpler node panel with Quality presets, placed lights, occlusion mattes, overscan, the camera input, haze, starburst, lens dirt, output layers and the FlareSim+ panel header.
 
 Tutorial by Steve: [https://youtu.be/yEsBOQNG16Y](https://youtu.be/yEsBOQNG16Y)
 
