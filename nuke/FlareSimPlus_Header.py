@@ -28,6 +28,7 @@ import json
 import math
 import os
 import re
+import time
 
 import nuke
 
@@ -358,6 +359,7 @@ PANEL_STYLE = os.environ.get('FLARESIM_PANEL_STYLE', '1').strip().lower() \
     not in ('0', 'false', 'off', 'no')
 _stylers = {}     # node full name -> _PanelStyler for its open panel
 RETRY_MS = (0, 60, 200, 600, 1500)   # styling attempts after the panel opens
+_rebuilds = {}    # node full name -> times its panel was rebuilt while open
 
 
 def panel_styling():
@@ -489,11 +491,13 @@ class _PanelStyler(QtCore.QObject):
     """Styles one node's open panel and keeps it styled: re-applies the
     ticks when Nuke rebuilds the knobs, redraws the header to the width of
     the knob area when it changes (the panel resized or its divider
-    dragged), and sizes a floating panel to its tab.  Lives as a child of
-    the panel, so it goes when the panel closes."""
+    dragged), and sizes a floating panel to its tab.  Not a child of the
+    panel: Nuke (on Linux) can delete and rebuild the panel's widgets while
+    it is open, and the styler must outlive that to show any knobs it hid
+    and style the new widgets (see _forget)."""
 
     def __init__(self, node, label, panel):
-        super(_PanelStyler, self).__init__(panel)
+        super(_PanelStyler, self).__init__(None)
         self._name = node.fullName()
         self._label = label
         self._panel = panel
@@ -564,8 +568,54 @@ class _PanelStyler(QtCore.QObject):
                                    self._viewport if _alive(self._viewport) else None)
 
     def _forget(self, *_args):
+        """The panel widget went.  Show every knob this styler hid (its tab
+        stack can outlive the panel), stop listening, and if the panel was
+        rebuilt rather than closed, style the new one."""
+        self._timer.stop()
         if _stylers.get(self._name) is self:
             del _stylers[self._name]
+        # The rest once Qt has finished deleting the panel's widgets.
+        QtCore.QTimer.singleShot(0, self._after_panel_gone)
+
+    def _after_panel_gone(self):
+        try:
+            self._unfold_all()
+        except RuntimeError:
+            pass
+        for w in (self._stack, self._viewport):
+            if _alive(w):
+                try:
+                    w.removeEventFilter(self)
+                except RuntimeError:
+                    pass
+        if _alive(self._stack):
+            try:
+                self._stack.currentChanged.disconnect(self._tab_changed)
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                for i in range(self._stack.count()):
+                    page = self._stack.widget(i)
+                    if _alive(page):
+                        page.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        self._stack = self._viewport = self._area = None
+        _log.debug('panel', '%s panel widget deleted', self._name)
+        # Nuke rebuilt the panel: style the new widgets, but give up if it
+        # keeps rebuilding (styling must never feed a rebuild loop).
+        now = time.time()
+        recent = [t for t in _rebuilds.get(self._name, []) if now - t < 5.0] + [now]
+        _rebuilds[self._name] = recent
+        if len(recent) > 8:
+            _log.debug('panel', '%s rebuilt %d times in 5 s; not restyling',
+                       self._name, len(recent))
+            return
+        if self._name in _stylers:
+            return       # the new panel is already styled
+        node = nuke.toNode(self._name)
+        if node is not None and node.shown():
+            _style_later(node)
 
     def alive(self):
         return _alive(self._panel)
@@ -576,18 +626,24 @@ class _PanelStyler(QtCore.QObject):
         if _alive(self._label):
             return self._label
         tag = '<!--flaresim:%s-->' % self._name
-        for l in self._panel.findChildren(QtWidgets.QLabel):
-            if tag in l.text():
-                self._label = l
-                return l
+        try:
+            for l in self._panel.findChildren(QtWidgets.QLabel):
+                if tag in l.text():
+                    self._label = l
+                    return l
+        except RuntimeError:     # the panel went (Nuke rebuilt it)
+            pass
         self._label = None
         return None
 
     def eventFilter(self, obj, event):
+        if not self.alive():
+            return False
         t = event.type()
-        if t == QtCore.QEvent.Show and obj is not self._panel and _is_folded(obj):
+        if t == QtCore.QEvent.Show and _is_folded(obj) and self._is_page(obj):
             # A tab is coming up with its knobs hidden (Nuke switched tabs
             # without the tab stack saying so): show them straight away.
+            # The panel itself can be a tab page, so it isn't left out.
             self._size_tabs_to_current(showing=obj)
         if t in (QtCore.QEvent.Resize, QtCore.QEvent.Show, QtCore.QEvent.ChildAdded,
                  QtCore.QEvent.LayoutRequest):
@@ -600,6 +656,16 @@ class _PanelStyler(QtCore.QObject):
         Show Advanced is toggled, so a window you resize by hand stays."""
         if not panel_styling() or not self.alive():
             return
+        try:
+            self._restyle(fit_window)
+        except RuntimeError:
+            # A widget went mid-way (Nuke rebuilt the panel).  If it was the
+            # panel, _forget shows the knobs and styles the new panel.
+            if self.alive():
+                raise
+            _log.debug('panel', '%s panel deleted while styling', self._name)
+
+    def _restyle(self, fit_window):
         self._bind(force=fit_window)
         _style_titles(self._panel)
         self._size_tabs_to_current()
@@ -626,10 +692,47 @@ class _PanelStyler(QtCore.QObject):
             if node is not None:
                 refresh(node)
 
+    def _is_page(self, w):
+        stack = self._stack
+        try:
+            return _alive(stack) and stack.indexOf(w) >= 0
+        except RuntimeError:
+            return False
+
+    def _holds_panel(self, page):
+        """True for the tab with the node's own knobs (the FlareSim+ tab)."""
+        try:
+            return page is self._panel or page.isAncestorOf(self._panel)
+        except RuntimeError:
+            return False
+
     def _tab_changed(self, *_args):
         self._size_tabs_to_current()
         self._fit_content_later()
         self._fit_later()
+        # Check again once Nuke has finished switching (on Linux the tab can
+        # come up after the tab stack says it changed).
+        QtCore.QTimer.singleShot(0, self._unfold_visible)
+        QtCore.QTimer.singleShot(150, self._unfold_visible)
+
+    def _unfold_visible(self):
+        """Safety net: a tab on screen never keeps its knobs hidden."""
+        stack = self._stack
+        if not self.alive() or not _alive(stack):
+            return
+        try:
+            pages = [stack.widget(i) for i in range(stack.count())]
+            visible = [p for p in pages if _alive(p) and p.isVisible()]
+            page = stack.currentWidget()
+            if page not in visible:
+                page = visible[0] if len(visible) == 1 else None
+            if page is not None and _is_folded(page):
+                _log.debug('panel', '%s tab %d on screen but folded; unfolding',
+                           self._name, stack.indexOf(page))
+                self._size_tabs_to_current(showing=page)
+                self._fit_content_later()
+        except RuntimeError:
+            pass
 
     def _fit_content_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_content)
@@ -709,7 +812,11 @@ class _PanelStyler(QtCore.QObject):
                 if policy.verticalPolicy() != want:
                     page.setSizePolicy(policy.horizontalPolicy(), want)
                     changed = True
-                if showing:
+                if showing or self._holds_panel(page):
+                    # The FlareSim+ tab's own knobs are never hidden: on
+                    # Linux they could stay hidden after coming back to the
+                    # tab.  Its Ignored size policy still keeps it out of
+                    # the tab stack's height.
                     changed = self._unfold(page) or changed
                 else:
                     changed = self._fold(page) or changed
