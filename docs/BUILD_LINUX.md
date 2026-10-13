@@ -132,8 +132,8 @@ scripts/package_release.sh --version 1.0.0 --nuke-versions "15"
 
 ```bash
 cd dist/nuke15
-objdump -T FlareSim.so | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1     # expect 2.28 or lower
-objdump -T FlareSim.so | grep -o 'GLIBCXX_[0-9.]*' | sort -Vu | tail -1   # expect 3.4.25 or lower
+objdump -T FlareSimPlus.so | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1     # expect 2.28 or lower
+objdump -T FlareSimPlus.so | grep -o 'GLIBCXX_[0-9.]*' | sort -Vu | tail -1   # expect 3.4.25 or lower
 ```
 
 Higher numbers mean the plugin needs a newer Linux than AlmaLinux 8 has.
@@ -147,8 +147,8 @@ Higher numbers mean the plugin needs a newer Linux than AlmaLinux 8 has.
 2. Put studio lenses in a shared folder and set `FLARESIM_LENS_PATH` to it (and `FLARESIM_LOOKS_PATH` for studio looks).
 3. Run the self-test on a workstation, and once as a farm job on a GPU render node:
    ```bash
-   nuke -t /path/to/FlareSim/FlareSim_SelfTest.py
-   nuke -t /path/to/FlareSim/FlareSim_SelfTest.py --script /path/to/a/shot.nk
+   nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py
+   nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py --script /path/to/a/shot.nk
    ```
    Each run writes `FlareSim_selftest_<machine>_<date>.txt` to your home folder. Bring the reports back if anything shows `FAIL` or `WARN`.
 

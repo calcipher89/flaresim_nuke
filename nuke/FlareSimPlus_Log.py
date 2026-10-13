@@ -1,5 +1,5 @@
 # ============================================================================
-# FlareSim_Log.py — FlareSim+ debug log and debug report
+# FlareSimPlus_Log.py — FlareSim+ debug log and debug report
 #
 # Errors are always written to the log file.  Debug lines (knob events,
 # panel sizes, lens lookups, Lens Browser actions) are only written while
@@ -271,9 +271,9 @@ def report_text():
                                                   'QT_SCALE_FACTOR', 'QT_AUTO_SCREEN_SCALE_FACTOR'):
             add('  %s=%s' % (key, os.environ[key]))
     try:
-        import FlareSim_Looks
+        import FlareSimPlus_Looks
         add('Lens folders')
-        for root in FlareSim_Looks.lens_search_roots():
+        for root in FlareSimPlus_Looks.lens_search_roots():
             add('  %s%s' % (root, '' if os.path.isdir(root) else '  (missing)'))
     except Exception as e:
         add('Lens folders: %s' % e)
@@ -282,15 +282,15 @@ def report_text():
     if nuke is not None:
         try:
             nodes = [n for n in nuke.allNodes(recurseGroups=True)
-                     if n.Class() in ('FlareSim', 'FlareSim3D')]
+                     if n.Class() in ('FlareSimPlus', 'FlareSimPlus3D')]
         except Exception:
             nodes = []
         add('Nodes (%d)' % len(nodes))
         for n in nodes:
             lens = _knob(n, 'lens_file') or ''
             try:
-                import FlareSim_Looks
-                found = FlareSim_Looks.resolve_lens(lens) if lens else ''
+                import FlareSimPlus_Looks
+                found = FlareSimPlus_Looks.resolve_lens(lens) if lens else ''
             except Exception:
                 found = '?'
             inputs = []
@@ -308,8 +308,8 @@ def report_text():
                     add('    %s = %s' % (name, v))
         add('')
         try:
-            import FlareSim_Header
-            panels = FlareSim_Header.open_panel_reports()
+            import FlareSimPlus_Header
+            panels = FlareSimPlus_Header.open_panel_reports()
         except Exception as e:
             panels = [('?', ['could not read the open panels: %s' % e])]
         add('Open panels (%d)' % len(panels))

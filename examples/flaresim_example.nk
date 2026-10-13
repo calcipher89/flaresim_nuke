@@ -74,7 +74,7 @@ CheckerBoard2 {
  ypos -145
 }
 set N1396a1a0 [stack 0]
-FlareSim3D {
+FlareSimPlus3D {
  inputs 3
  lens_file /home/pm/Documents/FlareSim/lenses/lens_files/Angenieux_28mm_F3.5_(Angenieux_28mm_f3.5_R11).lens
  ray_grid 2048
@@ -94,7 +94,7 @@ FlareSim3D {
  ypos -6
 }
 push $N1396a1a0
-FlareSim {
+FlareSimPlus {
  lens_file /home/pm/Documents/FlareSim/lenses/lens_files/Angenieux_28mm_F3.5_(Angenieux_28mm_f3.5_R11).lens
  ray_grid 2048
  flare_gain 100

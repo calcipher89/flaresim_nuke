@@ -1,5 +1,5 @@
 """
-FlareSim_LensBrowser.py — the FlareSim Lens Browser window.
+FlareSimPlus_LensBrowser.py — the FlareSim Lens Browser window.
 
 A standalone Qt window for picking a lens and building a flare look:
 
@@ -37,14 +37,14 @@ try:
 except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
-import FlareSim_Log as _log
-import FlareSim_Looks
+import FlareSimPlus_Log as _log
+import FlareSimPlus_Looks
 
 # QShortcut lives in QtWidgets in Qt 5 and in QtGui in Qt 6.
 QShortcut = getattr(QtWidgets, 'QShortcut', None) or QtGui.QShortcut
 
 
-FLARESIM_CLASSES = FlareSim_Looks.FLARESIM_CLASSES
+FLARESIM_CLASSES = FlareSimPlus_Looks.FLARESIM_CLASSES
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_LENS_ROOT = os.path.join(_HERE, 'lenses')
@@ -334,7 +334,7 @@ def preview_library():
     path = next((c for c in candidates if os.path.isfile(c)), None)
     if not path:
         _lib_error = ('The live preview library (%s) was not found next to '
-                      'FlareSim_LensBrowser.py. Rebuild and reinstall FlareSim to '
+                      'FlareSimPlus_LensBrowser.py. Rebuild and reinstall FlareSim to '
                       'get the preview.' % names[0])
         return None, _lib_error
     try:
@@ -379,14 +379,14 @@ def preview_library():
 # node's pixels; the preview scales them to its own size.
 SURF_DEFAULT = {'enabled': True, 'gain': 1.0, 'color': (1.0, 1.0, 1.0),
                 'offx': 0.0, 'offy': 0.0, 'scale': 1.0}
-# (knob name pattern, key), in the order of FlareSim_Looks.SURF_KNOBS.
+# (knob name pattern, key), in the order of FlareSimPlus_Looks.SURF_KNOBS.
 SURF_KNOB_KEYS = (('surf_%d', 'enabled'), ('surf_gain_%d', 'gain'),
                   ('surf_color_%d', 'color'), ('surf_offx_%d', 'offx'),
                   ('surf_offy_%d', 'offy'), ('surf_scale_%d', 'scale'))
 
 
 def default_surfaces():
-    return [dict(SURF_DEFAULT) for _ in range(FlareSim_Looks.MAX_SURFS)]
+    return [dict(SURF_DEFAULT) for _ in range(FlareSimPlus_Looks.MAX_SURFS)]
 
 
 def surface_changed(state):
@@ -1050,7 +1050,7 @@ def node_camera_focal(node):
     """Focal length in mm from the node's camera (cam input) or, failing
     that, its Use Sensor Size knobs.  0 when neither gives one."""
     try:
-        values = FlareSim_Looks.camera_values(node)
+        values = FlareSimPlus_Looks.camera_values(node)
         if values:
             return values[1]
         knobs = node.knobs()
@@ -2536,7 +2536,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
     # -- looks ----------------------------------------------------------
 
     def _refresh_looks(self, select_name=None):
-        self._looks = FlareSim_Looks.list_looks()
+        self._looks = FlareSimPlus_Looks.list_looks()
         self.look_combo.blockSignals(True)
         self.look_combo.clear()
         for look in self._looks:
@@ -2556,7 +2556,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             if look.get('lens'):
                 text += ('\n' if text else '') + 'Lens: %s' % _breakable(os.path.basename(look['lens']))
             self.look_desc.setText(text)
-            mine = FlareSim_Looks.can_delete(look)
+            mine = FlareSimPlus_Looks.can_delete(look)
             self.delete_look_btn.setEnabled(mine)
             self.delete_look_btn.setToolTip(
                 'Delete this look from your own looks folder.' if mine else
@@ -2570,7 +2570,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if not 0 <= i < len(self._looks):
             return
         look = self._looks[i]
-        if not FlareSim_Looks.can_delete(look):
+        if not FlareSimPlus_Looks.can_delete(look):
             return
         answer = QtWidgets.QMessageBox.question(
             self, 'Delete Look', 'Delete the look "%s"?\n\nThis removes %s and cannot be undone.'
@@ -2578,7 +2578,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if answer != QtWidgets.QMessageBox.Yes:
             return
         try:
-            FlareSim_Looks.delete_look(look)
+            FlareSimPlus_Looks.delete_look(look)
         except (OSError, ValueError) as e:
             QtWidgets.QMessageBox.warning(self, 'Delete Look', 'Could not delete the look:\n%s' % e)
             return
@@ -2593,7 +2593,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if not 0 <= i < len(self._looks):
             return
         look = self._looks[i]
-        lens = FlareSim_Looks.resolve_lens(look.get('lens', ''))
+        lens = FlareSimPlus_Looks.resolve_lens(look.get('lens', ''))
         if look.get('lens') and not lens:
             QtWidgets.QMessageBox.warning(self, 'FlareSim', 'Lens not found: %s' % look['lens'])
         surfaces = self._set_look_values(look.get('knobs', {}))
@@ -2619,7 +2619,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 row.blockSignals(False)
         self._look_extra = {k: v for k, v in values.items()
                             if k not in _EDITED_KNOBS and not _SURF_KNOB_RE.match(k)
-                            and k not in FlareSim_Looks.SKIPPED_KNOBS}
+                            and k not in FlareSimPlus_Looks.SKIPPED_KNOBS}
         if self._look_extra:
             self.extra_label.setText('Also from the look: %d more settings (highlight, '
                                      'spectral...) kept as they are.'
@@ -2643,10 +2643,10 @@ class LensBrowserWindow(QtWidgets.QWidget):
             'ghost_blur_passes': int(self.blur_passes.value()),
         })
         return {
-            'flaresim_look_version': FlareSim_Looks.LOOK_VERSION,
+            'flaresim_look_version': FlareSimPlus_Looks.LOOK_VERSION,
             'name': name,
             'description': '',
-            'lens': FlareSim_Looks.lens_to_look(self._lens_path),
+            'lens': FlareSimPlus_Looks.lens_to_look(self._lens_path),
             'knobs': knobs,
         }
 
@@ -2661,13 +2661,13 @@ class LensBrowserWindow(QtWidgets.QWidget):
         look = self.current_look(name.strip())
         look['description'] = desc.strip()
         try:
-            path = FlareSim_Looks.write_look(look)
+            path = FlareSimPlus_Looks.write_look(look)
         except FileExistsError as e:
             answer = QtWidgets.QMessageBox.question(
                 self, 'Save Look', 'A look named "%s" already exists. Replace it?' % name)
             if answer != QtWidgets.QMessageBox.Yes:
                 return
-            path = FlareSim_Looks.write_look(look, overwrite=True)
+            path = FlareSimPlus_Looks.write_look(look, overwrite=True)
         except OSError as e:
             QtWidgets.QMessageBox.warning(self, 'Save Look', 'Could not save the look:\n%s' % e)
             return
@@ -2703,7 +2703,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                     self, 'FlareSim', 'Select the FlareSim node(s) to update, then try again.')
             return []
         if create:
-            node = nuke.createNode('FlareSim', inpanel=False)
+            node = nuke.createNode('FlareSimPlus', inpanel=False)
             self._node = node
             self._created_node = node
             return [node]
@@ -2723,14 +2723,14 @@ class LensBrowserWindow(QtWidgets.QWidget):
         node = nodes[0]
         knobs = node.knobs()
         values = {}
-        for k in FlareSim_Looks.LOOK_KNOBS:
+        for k in FlareSimPlus_Looks.LOOK_KNOBS:
             if k in knobs:
-                values[k] = FlareSim_Looks._knob_value(knobs[k])
-        for i in range(FlareSim_Looks.MAX_SURFS):
+                values[k] = FlareSimPlus_Looks._knob_value(knobs[k])
+        for i in range(FlareSimPlus_Looks.MAX_SURFS):
             for pattern, _key in SURF_KNOB_KEYS:
                 k = pattern % i
                 if k in knobs:
-                    values[k] = FlareSim_Looks._knob_value(knobs[k])
+                    values[k] = FlareSimPlus_Looks._knob_value(knobs[k])
         surfaces = self._set_look_values(values)
         self._ref_width = _format_width(node)
         self._set_camera_focal(node_camera_focal(node), knobs)
@@ -2741,7 +2741,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         lens = knobs['lens_file'].value() if 'lens_file' in knobs else ''
         if lens:
             lens = nuke.filenameFilter(lens) if hasattr(nuke, 'filenameFilter') else lens
-            lens = FlareSim_Looks.resolve_lens(lens) or lens
+            lens = FlareSimPlus_Looks.resolve_lens(lens) or lens
         if lens and os.path.isfile(lens):
             self.set_lens(lens, surfaces)
         else:
@@ -2812,7 +2812,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 for pattern, key in SURF_KNOB_KEYS:
                     v = state[key]
                     look['knobs'][pattern % i] = list(v) if key == 'color' else v
-        warnings = FlareSim_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
+        warnings = FlareSimPlus_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
         self._update_node_headers(nodes, look_name=self._look_name if (self._look_name or not same_lens)
                                   else None)
         self._surf_dirty.clear()
@@ -2833,15 +2833,15 @@ class LensBrowserWindow(QtWidgets.QWidget):
         """After Apply to Node: record the look's name (None keeps the
         node's) and save the preview as the header's look thumbnail."""
         try:
-            import FlareSim_Header
+            import FlareSimPlus_Header
         except Exception:
             return
         for n in nodes:
             try:
                 if look_name is not None and 'look_name' in n.knobs():
                     n['look_name'].setValue(look_name)
-                FlareSim_Header.save_look_thumbnail(n, self.view.image)
-                FlareSim_Header.refresh(n)
+                FlareSimPlus_Header.save_look_thumbnail(n, self.view.image)
+                FlareSimPlus_Header.refresh(n)
             except Exception:
                 _log.exception('header', 'updating the header of %s', n.name())
 

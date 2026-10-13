@@ -1,5 +1,5 @@
 """
-FlareSim_Looks.py — save and apply FlareSim "looks".
+FlareSimPlus_Looks.py — save and apply FlareSim "looks".
 
 A look is a JSON file holding a lens and the knobs that shape the flare:
 gain, ray grid, aperture, spectral, highlight, blur and per-surface
@@ -18,13 +18,13 @@ import re
 
 import nuke
 
-import FlareSim_Log as _log
+import FlareSimPlus_Log as _log
 
 
 LOOK_VERSION = 1
 
 # Node classes that carry a lens_file knob.
-FLARESIM_CLASSES = ('FlareSim', 'FlareSim3D')
+FLARESIM_CLASSES = ('FlareSimPlus', 'FlareSimPlus3D')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_LOOKS_DIR = os.path.join(_HERE, 'looks')
@@ -213,7 +213,7 @@ def _search_lens(value):
 # ---------------------------------------------------------------------------
 
 # The input a Camera connects to, per node class.
-CAMERA_INPUT = {'FlareSim': 2, 'FlareSim3D': 1}
+CAMERA_INPUT = {'FlareSimPlus': 2, 'FlareSimPlus3D': 1}
 # Nodes that only pass their input on; followed to the node behind them.
 PASSTHROUGH_CLASSES = ('Dot', 'NoOp')
 

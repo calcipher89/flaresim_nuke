@@ -513,7 +513,7 @@ public:
     }
 
     // ---- Nuke boilerplate ----
-    const char* Class()     const override { return "FlareSim"; }
+    const char* Class()     const override { return "FlareSimPlus"; }
     const char* node_help() const override
     {
         return "Physically-based lens flare simulation (ghost ray tracing).\n\n"
@@ -664,7 +664,7 @@ public:
     void knobs(Knob_Callback f) override
     {
         // Panel header: the FlareSim+ wordmark and a card showing the
-        // node's lens and look.  FlareSim_Header.py draws it when the panel
+        // node's lens and look.  FlareSimPlus_Header.py draws it when the panel
         // opens and when the lens or look changes; it isn't saved.
         Named_Text_knob(f, "header", "");
         SetFlags(f, Knob::DO_NOT_WRITE | Knob::STARTLINE);
@@ -677,8 +677,8 @@ public:
         // settable from Python or the knob's expression.
         SetFlags(f, Knob::HIDDEN);
         Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
-        PyScript_knob(f, "import FlareSim_LensBrowser\n"
-                         "FlareSim_LensBrowser.show_for_node(nuke.thisNode())",
+        PyScript_knob(f, "import FlareSimPlus_LensBrowser\n"
+                         "FlareSimPlus_LensBrowser.show_for_node(nuke.thisNode())",
                       "lens_browser", "Lens Browser");
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
@@ -2080,6 +2080,6 @@ public:
 static Iop* build(Node* node) { return new FlareSim(node); }
 
 const Iop::Description FlareSim::d(
-    "FlareSim",
-    "Filter/FlareSim",
+    "FlareSimPlus",
+    "Filter/FlareSim+",
     build);

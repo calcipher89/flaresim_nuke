@@ -1,8 +1,8 @@
 # FlareSim+ — Nuke node menu registration
 #
-# Keep this file (and the other FlareSim_*.py files and the icons folder) in
-# the same folder as the
-# FlareSim and FlareSim3D plugins, and add that folder to Nuke's plugin path,
+# Keep this file (and the FlareSimPlus_*.py files and the icons folder) in
+# the same folder as the FlareSimPlus and FlareSimPlus3D plugins, and add that
+# folder to Nuke's plugin path,
 # e.g. in ~/.nuke/init.py:
 #
 #     nuke.pluginAddPath('./plugins/FlareSim')
@@ -13,28 +13,32 @@ import nuke
 
 nuke.menu('Nodes').addCommand(
     'Filter/FlareSim+',
-    'nuke.createNode("FlareSim")',
+    'nuke.createNode("FlareSimPlus")',
 )
 nuke.menu('Nodes').addCommand(
     'Filter/FlareSim+ 3D',
-    'nuke.createNode("FlareSim3D")',
+    'nuke.createNode("FlareSimPlus3D")',
 )
 
 try:
-    import FlareSim_Header
-    FlareSim_Header.register()
+    import FlareSimPlus_Header
+    FlareSimPlus_Header.register()
 except Exception as e:
     nuke.warning(f'FlareSim: could not load the panel header: {e}')
 
 nuke.menu('Nuke').addCommand(
     'Help/FlareSim+/Self Test',
-    'import FlareSim_SelfTest; FlareSim_SelfTest.run()',
+    'import FlareSimPlus_SelfTest; FlareSimPlus_SelfTest.run()',
 )
 nuke.menu('Nuke').addCommand(
     'Help/FlareSim+/Debug Logging On or Off',
-    'import FlareSim_Log; FlareSim_Log.toggle_from_menu()',
+    'import FlareSimPlus_Log; FlareSimPlus_Log.toggle_from_menu()',
 )
 nuke.menu('Nuke').addCommand(
     'Help/FlareSim+/Save Debug Report',
-    'import FlareSim_Log; FlareSim_Log.report_from_menu()',
+    'import FlareSimPlus_Log; FlareSimPlus_Log.report_from_menu()',
+)
+nuke.menu('Nuke').addCommand(
+    'Help/FlareSim+/Convert FlareSim Nodes',
+    'import FlareSimPlus_Convert; FlareSimPlus_Convert.convert_from_menu()',
 )

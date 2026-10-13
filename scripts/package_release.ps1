@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 foreach ($nv in $NukeVersions) {
     $src = Join-Path $DistDir "nuke$nv"
-    if (-not (Test-Path (Join-Path $src "FlareSim.dll")) -or -not (Test-Path (Join-Path $src "FlareSim3D.dll"))) {
+    if (-not (Test-Path (Join-Path $src "FlareSimPlus.dll")) -or -not (Test-Path (Join-Path $src "FlareSimPlus3D.dll"))) {
         Write-Host "  Nuke ${nv}: plugins not found in $src - skipping." -ForegroundColor Yellow
         continue
     }
@@ -31,11 +31,11 @@ foreach ($nv in $NukeVersions) {
     $pkg   = Join-Path $stage "FlareSim"
     New-Item -ItemType Directory -Force -Path (Join-Path $pkg "lenses") | Out-Null
 
-    Copy-Item (Join-Path $src "FlareSim.dll"), (Join-Path $src "FlareSim3D.dll") $pkg
+    Copy-Item (Join-Path $src "FlareSimPlus.dll"), (Join-Path $src "FlareSimPlus3D.dll") $pkg
     $preview = Join-Path $src "flaresim_preview.dll"
     if (Test-Path $preview) { Copy-Item $preview $pkg }
     else { Write-Host "  Nuke ${nv}: flaresim_preview.dll not found - Lens Browser preview will be off." -ForegroundColor Yellow }
-    Copy-Item (Join-Path $repoDir "nuke\menu.py"), (Join-Path $repoDir "nuke\FlareSim_LensBrowser.py"), (Join-Path $repoDir "nuke\FlareSim_Looks.py"), (Join-Path $repoDir "nuke\FlareSim_Header.py"), (Join-Path $repoDir "nuke\FlareSim_SelfTest.py"), (Join-Path $repoDir "nuke\FlareSim_Log.py") $pkg
+    Copy-Item (Join-Path $repoDir "nuke\menu.py"), (Join-Path $repoDir "nuke\FlareSimPlus_LensBrowser.py"), (Join-Path $repoDir "nuke\FlareSimPlus_Looks.py"), (Join-Path $repoDir "nuke\FlareSimPlus_Header.py"), (Join-Path $repoDir "nuke\FlareSimPlus_SelfTest.py"), (Join-Path $repoDir "nuke\FlareSimPlus_Log.py"), (Join-Path $repoDir "nuke\FlareSimPlus_Convert.py") $pkg
     Copy-Item (Join-Path $repoDir "nuke\icons") $pkg -Recurse
     Copy-Item (Join-Path $repoDir "looks") $pkg -Recurse
     Copy-Item (Join-Path $repoDir "lenses\lens_files") (Join-Path $pkg "lenses") -Recurse
