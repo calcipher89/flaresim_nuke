@@ -358,7 +358,7 @@ def tick_image():
 PANEL_STYLE = os.environ.get('FLARESIM_PANEL_STYLE', '1').strip().lower() \
     not in ('0', 'false', 'off', 'no')
 _stylers = {}     # node full name -> _PanelStyler for its open panel
-RETRY_MS = (0, 60, 200, 600, 1500)   # styling attempts after the panel opens
+RETRY_MS = (0, 60, 200, 600, 1500, 3000, 6000)   # styling attempts after the panel opens
 _rebuilds = {}    # node full name -> times its panel was rebuilt while open
 
 
@@ -578,6 +578,27 @@ class _PanelStyler(QtCore.QObject):
         QtCore.QTimer.singleShot(0, self._after_panel_gone)
 
     def _after_panel_gone(self):
+        self.detach()
+        _log.debug('panel', '%s panel widget deleted', self._name)
+        # Nuke rebuilt the panel: style the new widgets, but give up if it
+        # keeps rebuilding (styling must never feed a rebuild loop).
+        now = time.time()
+        recent = [t for t in _rebuilds.get(self._name, []) if now - t < 5.0] + [now]
+        _rebuilds[self._name] = recent
+        if len(recent) > 8:
+            _log.debug('panel', '%s rebuilt %d times in 5 s; not restyling',
+                       self._name, len(recent))
+            return
+        if self._name in _stylers:
+            return       # the new panel is already styled
+        node = nuke.toNode(self._name)
+        if node is not None and node.shown():
+            _style_later(node)
+
+    def detach(self):
+        """Stop styling: show every knob this styler hid and stop
+        listening."""
+        self._timer.stop()
         try:
             self._unfold_all()
         except RuntimeError:
@@ -601,24 +622,22 @@ class _PanelStyler(QtCore.QObject):
             except RuntimeError:
                 pass
         self._stack = self._viewport = self._area = None
-        _log.debug('panel', '%s panel widget deleted', self._name)
-        # Nuke rebuilt the panel: style the new widgets, but give up if it
-        # keeps rebuilding (styling must never feed a rebuild loop).
-        now = time.time()
-        recent = [t for t in _rebuilds.get(self._name, []) if now - t < 5.0] + [now]
-        _rebuilds[self._name] = recent
-        if len(recent) > 8:
-            _log.debug('panel', '%s rebuilt %d times in 5 s; not restyling',
-                       self._name, len(recent))
-            return
-        if self._name in _stylers:
-            return       # the new panel is already styled
-        node = nuke.toNode(self._name)
-        if node is not None and node.shown():
-            _style_later(node)
+        if _alive(self._panel):
+            try:
+                self._panel.removeEventFilter(self)
+                self._panel.destroyed.disconnect(self._forget)
+            except (RuntimeError, TypeError):
+                pass
+        self._panel = None
 
     def alive(self):
         return _alive(self._panel)
+
+    def on_screen(self):
+        try:
+            return self.alive() and self._panel.isVisible()
+        except RuntimeError:
+            return False
 
     def header_label(self):
         """The header label, found again inside this panel if Nuke rebuilt
@@ -904,25 +923,43 @@ class _PanelStyler(QtCore.QObject):
             win.resize(win.width(), need)
 
 
-def style_panel(node):
-    """Style the node's open panel.  Returns True once it is styled."""
+def _on_screen(w):
+    try:
+        return w.isVisible()
+    except RuntimeError:
+        return False
+
+
+def style_panel(node, fit_window=True):
+    """Style the node's open panel.  Returns True once the panel on screen
+    is styled.  Nuke (on Linux) can build a node's panel twice when it first
+    opens, so a panel that isn't on screen doesn't count: a later attempt
+    styles the one that is."""
     if not panel_styling():
         return False
     name = node.fullName()
     styler = _stylers.get(name)
-    if styler is None or not styler.alive():
-        label = panel = None
+    if styler is None or not styler.alive() or not styler.on_screen():
+        found = []
         for l in _find_header_labels(node):
             panel = _panel_of(l)
             if panel is not None:
-                label = l
-                break
-        if panel is None:
+                found.append((l, panel))
+        shown = [f for f in found if _on_screen(f[1])]
+        pick = (shown or found or [None])[0]
+        if pick is None:
+            if styler is not None and styler.alive():
+                styler.restyle(fit_window=fit_window)
             return False             # not built yet; a later attempt will
-        styler = _PanelStyler(node, label, panel)
-        _stylers[name] = styler
-    styler.restyle(fit_window=True)
-    return styler.bound()
+        label, panel = pick
+        if styler is None or not styler.alive() or styler._panel is not panel:
+            if styler is not None:
+                _log.debug('panel', '%s: styling the panel on screen instead', name)
+                styler.detach()
+            styler = _PanelStyler(node, label, panel)
+            _stylers[name] = styler
+    styler.restyle(fit_window=fit_window)
+    return styler.bound() and styler.on_screen()
 
 
 def open_panel_reports():
@@ -938,7 +975,9 @@ def open_panel_reports():
 def _style_later(node):
     """Style the panel once Nuke has built it.  Nuke builds the widgets
     after the showPanel callback, and not always by the next event loop
-    turn, so this tries a few times and stops at the first success."""
+    turn (a first open on Linux can take seconds), so this tries a few
+    times.  After the first success the later tries still check the panel
+    on screen is the styled one, without refitting the window."""
     if not panel_styling():
         return
     try:
@@ -948,11 +987,11 @@ def _style_later(node):
     state = {'done': False}
 
     def attempt():
-        if state['done']:
-            return
         try:
             n = nuke.toNode(name)
-            if n is not None and style_panel(n):
+            if n is None or not n.shown():
+                return
+            if style_panel(n, fit_window=not state['done']):
                 state['done'] = True
         except Exception:
             # Keep trying (Nuke may still be rebuilding the panel); say so once.
