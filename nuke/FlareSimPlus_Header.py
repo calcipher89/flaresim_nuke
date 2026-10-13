@@ -1,5 +1,5 @@
 """
-FlareSim_Header.py — the FlareSim+ header at the top of the node's panel.
+FlareSimPlus_Header.py — the FlareSim+ header at the top of the node's panel.
 
 The header is the FlareSim+ wordmark over a card for the node's lens: a
 small render of its look, the lens name, the look name, and the camera's
@@ -31,14 +31,14 @@ import re
 
 import nuke
 
-import FlareSim_Log as _log
+import FlareSimPlus_Log as _log
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
 except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
-NODE_CLASSES = ('FlareSim', 'FlareSim3D')
+NODE_CLASSES = ('FlareSimPlus', 'FlareSimPlus3D')
 HEADER_VERSION = 1
 HEADER_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'headers')
 LOOK_THUMB_DIR = os.path.join(HEADER_DIR, 'looks')
@@ -76,23 +76,23 @@ def lens_path(node):
     if path and hasattr(nuke, 'filenameFilter'):
         path = nuke.filenameFilter(path)
     if path and not os.path.isfile(path):
-        import FlareSim_Looks
-        path = FlareSim_Looks.resolve_lens(path) or path
+        import FlareSimPlus_Looks
+        path = FlareSimPlus_Looks.resolve_lens(path) or path
     return path.replace('\\', '/')
 
 
 def camera_focal(node):
     """Focal length (mm) of the camera the node uses, or 0."""
-    import FlareSim_Looks
-    values = FlareSim_Looks.camera_values(node)
+    import FlareSimPlus_Looks
+    values = FlareSimPlus_Looks.camera_values(node)
     return values[1] if values else 0.0
 
 
 def look_key(node):
     """Identifies the node's lens and look settings, so a saved look
     thumbnail is used only while the node still matches it."""
-    import FlareSim_Looks
-    look = FlareSim_Looks.capture_look(node, '')
+    import FlareSimPlus_Looks
+    look = FlareSimPlus_Looks.capture_look(node, '')
     look['lens'] = lens_path(node)
     look['name'] = _knob(node, 'look_name', '') or ''
     text = json.dumps(look, sort_keys=True)
@@ -124,8 +124,8 @@ def _thumbnail(node, lens):
         return path
     if lens:
         try:
-            import FlareSim_LensBrowser
-            path = FlareSim_LensBrowser.thumbnail_path(lens)
+            import FlareSimPlus_LensBrowser
+            path = FlareSimPlus_LensBrowser.thumbnail_path(lens)
             if os.path.isfile(path):
                 return path
         except Exception:
@@ -139,8 +139,8 @@ def header_info(node):
     name, focal, fnum = '', 0.0, 0.0
     if lens:
         try:
-            import FlareSim_LensBrowser
-            info = FlareSim_LensBrowser.LensInfo(lens)
+            import FlareSimPlus_LensBrowser
+            info = FlareSimPlus_LensBrowser.LensInfo(lens)
             name, focal, fnum = info.name, info.focal, info.fnum
         except Exception:
             name = os.path.splitext(os.path.basename(lens))[0].replace('_', ' ')
@@ -351,7 +351,7 @@ def tick_image():
 # size, and updates the next time the panel opens), either set
 #     os.environ['FLARESIM_PANEL_STYLE'] = '0'
 # in init.py, or put
-#     FlareSim_Header.PANEL_STYLE = False
+#     FlareSimPlus_Header.PANEL_STYLE = False
 # in menu.py after the FlareSim import.
 
 PANEL_STYLE = os.environ.get('FLARESIM_PANEL_STYLE', '1').strip().lower() \
@@ -869,13 +869,13 @@ _cam_state = {}   # node full name -> last camera signature
 
 
 def _camera_signature(node):
-    import FlareSim_Looks
-    values = FlareSim_Looks.camera_values(node)
+    import FlareSimPlus_Looks
+    values = FlareSimPlus_Looks.camera_values(node)
     knobs = node.knobs()
     cam = None
     try:
-        index = FlareSim_Looks.CAMERA_INPUT.get(node.Class())
-        connected = FlareSim_Looks.upstream(node, index) if index is not None else None
+        index = FlareSimPlus_Looks.CAMERA_INPUT.get(node.Class())
+        connected = FlareSimPlus_Looks.upstream(node, index) if index is not None else None
         cam = connected.name() if connected is not None else None
     except Exception:
         pass
@@ -889,9 +889,9 @@ def _camera_signature(node):
 def camera_info_text(node, values):
     knobs = node.knobs()
     if values is None:
-        import FlareSim_Looks
-        index = FlareSim_Looks.CAMERA_INPUT.get(node.Class())
-        connected = index is not None and FlareSim_Looks.upstream(node, index) is not None
+        import FlareSimPlus_Looks
+        index = FlareSimPlus_Looks.CAMERA_INPUT.get(node.Class())
+        connected = index is not None and FlareSimPlus_Looks.upstream(node, index) is not None
         if connected and 'use_camera' in knobs and not knobs['use_camera'].value():
             return 'Camera connected but not used; using the knobs below'
         return 'No camera; using the knobs below'
@@ -953,8 +953,8 @@ def sync_camera(node, force=False):
     if not force and _cam_state.get(name) == sig:
         return
     _cam_state[name] = sig
-    import FlareSim_Looks
-    values = FlareSim_Looks.camera_values(node)
+    import FlareSimPlus_Looks
+    values = FlareSimPlus_Looks.camera_values(node)
     _set_camera_knobs(node, values)
     refresh(node)
 

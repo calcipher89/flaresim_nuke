@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 #   cmake --build build --config Release -j
 #
 # Options:
-#   FLARESIM_BUILD_PLUGINS  (ON)  build FlareSim + FlareSim3D for Nuke
+#   FLARESIM_BUILD_PLUGINS  (ON)  build the FlareSimPlus + FlareSimPlus3D nodes for Nuke
 #   FLARESIM_BUILD_TESTS    (ON)  build the CPU-only optics smoke test
 #
 # The flaresim_preview library (live preview in the Lens Browser window) is
@@ -166,7 +166,7 @@ if(NOT EXISTS "${_ddimage_lib}")
         "  Set -DNUKE_VERSION=<ver> or -DNUKE_LIB_DIR=<path>.")
 endif()
 
-set(FLARESIM_TARGETS FlareSim FlareSim3D)
+set(FLARESIM_TARGETS FlareSimPlus FlareSimPlus3D)
 
 # ===========================================================================
 # macOS — Metal backend
@@ -211,8 +211,8 @@ if(APPLE)
     add_custom_target(embedded_metallib DEPENDS "${METALLIB}")
 
     set(FLARESIM_BACKEND_SOURCES src/metal/ghost_metal.mm "${EMBED_ASM}")
-    add_library(FlareSim   SHARED src/metal/FlareSim.mm   ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
-    add_library(FlareSim3D SHARED src/metal/FlareSim3D.mm ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
+    add_library(FlareSimPlus   SHARED src/metal/FlareSim.mm   ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
+    add_library(FlareSimPlus3D SHARED src/metal/FlareSim3D.mm ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
 
     # Objective-C++ without ARC — manual memory management to match the NDK.
     set_source_files_properties(
@@ -299,8 +299,8 @@ else()
     endif()
 
     set(FLARESIM_BACKEND_SOURCES src/ghost_cuda.cu src/blur_cuda.cu)
-    add_library(FlareSim   SHARED src/FlareSim.cpp   ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
-    add_library(FlareSim3D SHARED src/FlareSim3D.cpp ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
+    add_library(FlareSimPlus   SHARED src/FlareSim.cpp   ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
+    add_library(FlareSimPlus3D SHARED src/FlareSim3D.cpp ${FLARESIM_CORE_SOURCES} ${FLARESIM_BACKEND_SOURCES})
 
     foreach(_tgt ${FLARESIM_TARGETS})
         target_include_directories(${_tgt} PRIVATE src "${NDK_ROOT}")
@@ -323,6 +323,10 @@ else()
         else()
             target_compile_options(${_tgt} PRIVATE
                 $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wno-deprecated-declarations>)
+            # Bind our own symbols inside the plugin.  Other FlareSim builds
+            # (e.g. an older facility install) share class and function
+            # names; without this, Nuke can resolve calls into their .so.
+            target_link_options(${_tgt} PRIVATE -Wl,-Bsymbolic)
         endif()
 
         # Allow constexpr on device without __device__ tags; sm_70 is still
@@ -348,8 +352,9 @@ endforeach()
 install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
-install(FILES nuke/menu.py nuke/FlareSim_LensBrowser.py nuke/FlareSim_Looks.py
-    nuke/FlareSim_Header.py nuke/FlareSim_SelfTest.py nuke/FlareSim_Log.py DESTINATION .)
+install(FILES nuke/menu.py nuke/FlareSimPlus_LensBrowser.py nuke/FlareSimPlus_Looks.py
+    nuke/FlareSimPlus_Header.py nuke/FlareSimPlus_SelfTest.py nuke/FlareSimPlus_Log.py
+    nuke/FlareSimPlus_Convert.py DESTINATION .)
 install(DIRECTORY nuke/icons/ DESTINATION icons
     FILES_MATCHING PATTERN "*.png")
 install(DIRECTORY looks/ DESTINATION looks

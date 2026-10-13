@@ -5,8 +5,8 @@
 #
 # In a terminal (also as a farm job):
 #
-#     nuke -t /path/to/FlareSim/FlareSim_SelfTest.py
-#     nuke -t /path/to/FlareSim/FlareSim_SelfTest.py --all --script shot.nk
+#     nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py
+#     nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py --all --script shot.nk
 #
 #   --all            render every lens, not just a sample (slower)
 #   --script PATH    also check the lens paths in this Nuke script
@@ -14,7 +14,7 @@
 #
 # In Nuke: Help > FlareSim+ > Self Test, or in the Script Editor:
 #
-#     import FlareSim_SelfTest; FlareSim_SelfTest.run()
+#     import FlareSimPlus_SelfTest; FlareSimPlus_SelfTest.run()
 #
 # In the GUI the lens paths of the open script are checked too.
 
@@ -161,7 +161,7 @@ def _plugin_file(name):
 
 def check_install(report):
     report.add(INFO, 'Install folder: %s' % _HERE)
-    for name in ('FlareSim', 'FlareSim3D', 'flaresim_preview'):
+    for name in ('FlareSimPlus', 'FlareSimPlus3D', 'flaresim_preview'):
         path = _plugin_file(name)
         if os.path.isfile(path):
             stamp = datetime.datetime.fromtimestamp(os.path.getmtime(path))
@@ -170,31 +170,49 @@ def check_install(report):
         else:
             report.add(FAIL if name != 'flaresim_preview' else WARN,
                        '%s missing from the install folder' % os.path.basename(path))
-    for name in ('menu.py', 'FlareSim_LensBrowser.py', 'FlareSim_Looks.py',
-                 'FlareSim_Header.py', 'icons', 'looks', 'lenses'):
+    for name in ('menu.py', 'FlareSimPlus_LensBrowser.py', 'FlareSimPlus_Looks.py',
+                 'FlareSimPlus_Header.py', 'icons', 'looks', 'lenses'):
         if not os.path.exists(os.path.join(_HERE, name)):
             report.add(FAIL, '%s missing from the install folder' % name)
     if not os.access(_HERE, os.W_OK):
         report.add(INFO, 'Install folder is read-only (fine for a shared install)')
     if sys.platform.startswith('linux'):
-        out = _run_cmd(['ldd', _plugin_file('FlareSim')])
+        out = _run_cmd(['ldd', _plugin_file('FlareSimPlus')])
         # libDDImage and libNdk come with Nuke and may not be on ldd's path.
         missing = [l.strip() for l in (out or '').splitlines()
                    if 'not found' in l and 'DDImage' not in l and 'Ndk' not in l]
         if missing:
-            report.add(WARN, 'FlareSim.so may need libraries this machine lacks',
+            report.add(WARN, 'FlareSimPlus.so may need libraries this machine lacks',
                        '\n'.join(missing))
         elif out is not None:
-            report.add(PASS, 'FlareSim.so library dependencies found')
+            report.add(PASS, 'FlareSimPlus.so library dependencies found')
+
+
+def check_original_flaresim(report):
+    # An original FlareSim (classes FlareSim / FlareSim3D) can sit next to
+    # FlareSim+ now that the classes differ; say so, since its nodes still
+    # render with the old code.
+    others = sorted({os.path.dirname(p) for p in nuke.plugins(nuke.ALL)
+                     if os.path.splitext(os.path.basename(p))[0] in ('FlareSim', 'FlareSim3D')
+                     and os.path.splitext(p)[1] in ('.so', '.dll', '.dylib')})
+    if others:
+        report.add(INFO, 'Original FlareSim is also installed (separate nodes; '
+                         'Help > FlareSim+ > Convert FlareSim Nodes upgrades them)',
+                   '\n'.join(others))
 
 
 def check_plugin_load(report):
-    for cls in ('FlareSim', 'FlareSim3D'):
+    for cls in ('FlareSimPlus', 'FlareSimPlus3D'):
         try:
             nuke.load(cls)
         except Exception as e:
             report.add(FAIL, 'Could not load the %s plugin' % cls, str(e))
             continue
+        loaded = [p for p in nuke.plugins() if os.path.splitext(os.path.basename(p))[0] == cls]
+        if loaded and os.path.normcase(os.path.dirname(os.path.abspath(loaded[0]))) != \
+                os.path.normcase(_HERE):
+            report.add(WARN, '%s was loaded from another folder' % cls,
+                       '%s\nThis self-test is in %s' % (loaded[0], _HERE))
         node = None
         try:
             node = getattr(nuke.nodes, cls)()
@@ -222,9 +240,9 @@ def check_folders(report):
 
 
 def _all_lenses():
-    import FlareSim_Looks
+    import FlareSimPlus_Looks
     out = []
-    for root in FlareSim_Looks.lens_search_roots():
+    for root in FlareSimPlus_Looks.lens_search_roots():
         if not os.path.isdir(root):
             continue
         for folder, _dirs, files in os.walk(root):
@@ -235,27 +253,27 @@ def _all_lenses():
 
 
 def check_lens_folders(report):
-    import FlareSim_Looks
+    import FlareSimPlus_Looks
     lenses = _all_lenses()
-    for root in FlareSim_Looks.lens_search_roots():
+    for root in FlareSimPlus_Looks.lens_search_roots():
         n = sum(1 for r, _ in lenses if r == root)
         if not os.path.isdir(root):
-            if root != FlareSim_Looks.USER_LENS_DIR:
-                report.add(FAIL if root == FlareSim_Looks.BUNDLED_LENS_ROOT else WARN,
+            if root != FlareSimPlus_Looks.USER_LENS_DIR:
+                report.add(FAIL if root == FlareSimPlus_Looks.BUNDLED_LENS_ROOT else WARN,
                            'Lens folder not found: %s' % root)
-        elif root == FlareSim_Looks.USER_LENS_DIR:
+        elif root == FlareSimPlus_Looks.USER_LENS_DIR:
             report.add(INFO, '%d imported lenses in %s' % (n, root))
         else:
             report.add(PASS if n else WARN, '%d lenses in %s' % (n, root))
-    if os.path.isdir(FlareSim_Looks.USER_LENS_DIR) and os.listdir(FlareSim_Looks.USER_LENS_DIR):
+    if os.path.isdir(FlareSimPlus_Looks.USER_LENS_DIR) and os.listdir(FlareSimPlus_Looks.USER_LENS_DIR):
         report.add(WARN, 'Lenses imported into your home folder (%s) are not seen '
                          'by other artists or the farm. Put studio lenses in a folder '
-                         'on FLARESIM_LENS_PATH.' % FlareSim_Looks.USER_LENS_DIR)
+                         'on FLARESIM_LENS_PATH.' % FlareSimPlus_Looks.USER_LENS_DIR)
 
 
 def check_preview(report):
     try:
-        import FlareSim_LensBrowser as lb
+        import FlareSimPlus_LensBrowser as lb
     except Exception as e:
         report.add(FAIL, 'Lens Browser could not be imported', str(e))
         return
@@ -304,7 +322,7 @@ def _render_lens(lens, out_dir):
         const = nuke.nodes.Constant(color=[0, 0, 0, 1])
         made.append(const)
         const['format'].setValue('flaresim_selftest')
-        fs = nuke.nodes.FlareSim(inputs=[const])
+        fs = nuke.nodes.FlareSimPlus(inputs=[const])
         made.append(fs)
         fs['source_mode'].setValue('Manual XY')
         fs['manual_xy'].setValue([w * 0.35, h * 0.6])
@@ -366,14 +384,14 @@ def check_render(report, all_lenses=False):
 
 
 def check_script_lenses(report, script=None):
-    import FlareSim_Looks
+    import FlareSimPlus_Looks
     if script:
         nuke.scriptOpen(script)
         report.add(INFO, 'Script: %s' % script)
     else:
         report.add(INFO, 'Script: %s' % (nuke.root().name() or 'untitled'))
     nodes = [n for n in nuke.allNodes(recurseGroups=True)
-             if n.Class() in FlareSim_Looks.FLARESIM_CLASSES]
+             if n.Class() in FlareSimPlus_Looks.FLARESIM_CLASSES]
     if not nodes:
         report.add(INFO, 'No FlareSim+ nodes in the script')
         return
@@ -383,7 +401,7 @@ def check_script_lenses(report, script=None):
             report.add(WARN, '%s has no lens' % n.fullName())
             continue
         path = nuke.filenameFilter(stored) if hasattr(nuke, 'filenameFilter') else stored
-        found = FlareSim_Looks.resolve_lens(path)
+        found = FlareSimPlus_Looks.resolve_lens(path)
         if not found:
             report.add(FAIL, '%s: lens not found on this machine' % n.fullName(), stored)
         elif os.path.normcase(found) != os.path.normcase(path.replace('\\', '/')):
@@ -410,6 +428,7 @@ def run(all_lenses=False, script=None, out=None, show=True):
     _check(report, 'NVIDIA GPU', check_gpu)
     _check(report, 'Install', check_install)
     _check(report, 'Plugin', check_plugin_load)
+    _check(report, 'Original FlareSim', check_original_flaresim)
     _check(report, 'User folders', check_folders)
     _check(report, 'Lens folders', check_lens_folders)
     _check(report, 'Lens Browser', check_preview)
@@ -450,7 +469,7 @@ def _main(argv):
 
 
 if __name__ == '__main__':
-    # Run as "nuke -t FlareSim_SelfTest.py": make the plugin findable even
+    # Run as "nuke -t FlareSimPlus_SelfTest.py": make the plugin findable even
     # when this folder isn't on NUKE_PATH.
     if _HERE not in sys.path:
         sys.path.insert(0, _HERE)

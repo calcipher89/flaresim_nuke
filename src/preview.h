@@ -1,11 +1,11 @@
 // ============================================================================
 // preview.h — small C API for rendering a live flare preview.
 //
-// Used by the Lens Browser window (nuke/FlareSim_LensBrowser.py) through
+// Used by the Lens Browser window (nuke/FlareSimPlus_LensBrowser.py) through
 // ctypes, so it has no Nuke dependency.  Renders one point source through a
 // lens into an 8-bit RGBA image on the CPU.
 //
-// Keep FspParams in sync with the ctypes Structure in FlareSim_LensBrowser.py.
+// Keep FspParams in sync with the ctypes Structure in FlareSimPlus_LensBrowser.py.
 // ============================================================================
 #pragma once
 

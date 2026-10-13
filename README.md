@@ -17,9 +17,16 @@ So FlareSim+ keeps the physics and the speed, and puts an artist-friendly layer 
 
 The FlareSim tab opens with a FlareSim+ header and a lens card showing a thumbnail of the look, the lens name, the look name and the focal length. It updates on its own when you change the lens, the look or the camera.
 
-That styling works on Nuke's own panel widgets, only while a FlareSim panel is open. If it ever causes trouble, turn it off with `os.environ['FLARESIM_PANEL_STYLE'] = '0'` in `init.py` (or `FlareSim_Header.PANEL_STYLE = False` in `menu.py`): you get Nuke's plain panel, and the header still shows at a fixed size and updates the next time the panel opens.
+That styling works on Nuke's own panel widgets, only while a FlareSim panel is open. If it ever causes trouble, turn it off with `os.environ['FLARESIM_PANEL_STYLE'] = '0'` in `init.py` (or `FlareSimPlus_Header.PANEL_STYLE = False` in `menu.py`): you get Nuke's plain panel, and the header still shows at a fixed size and updates the next time the panel opens.
 
-The new name is only what you see in the panel, the **Nodes** menu and the Lens Browser. The node classes are still `FlareSim` and `FlareSim3D`, so existing scripts and looks open as before.
+The node classes are `FlareSimPlus` and `FlareSimPlus3D` (plugins `FlareSimPlus.so` / `.dll` / `.dylib`, Python modules `FlareSimPlus_*.py`), so FlareSim+ installs next to an original FlareSim without either one taking over the other's nodes.
+
+**Old scripts.** Original `FlareSim` / `FlareSim3D` nodes stay as they are until you convert them. The knobs carry over, so a converted node starts with the same settings:
+
+- In Nuke, **Help → FlareSim+ → Convert FlareSim Nodes** converts the selected FlareSim nodes, or all of them when none is selected (the original plugin must be installed so the old nodes open). Ctrl+Z undoes it.
+- On a script file, without either plugin: `python FlareSimPlus_Convert.py shot.nk` writes `shot_flaresimplus.nk`; `--in-place` overwrites the script and keeps a `.bak`.
+
+Looks saved before the rename apply as before.
 
 ### Simpler Node Panel
 
@@ -208,7 +215,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 
 ## Installation
 
-1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSim`, `FlareSim3D`, `flaresim_preview`, `menu.py`, `FlareSim_LensBrowser.py`, `FlareSim_Looks.py`, `FlareSim_Header.py`, `FlareSim_SelfTest.py`, `icons/`, `looks/` and `lenses/`.
+1. Unzip a release (or run `cmake --install`) so you have `~/.nuke/plugins/FlareSim/` containing `FlareSimPlus`, `FlareSimPlus3D`, `flaresim_preview`, `menu.py`, the `FlareSimPlus_*.py` files, `icons/`, `looks/` and `lenses/`.
 2. Add this to `~/.nuke/init.py`:
    ```python
    nuke.pluginAddPath('./plugins/FlareSim')
@@ -222,7 +229,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 - **Studio lenses.** Put shared lenses in a folder on `FLARESIM_LENS_PATH` (`:`-separated on Linux and macOS, `;` on Windows). Lenses imported in the Lens Browser go to the artist's own `~/.nuke/FlareSim/lenses`, which other artists and the farm can't see.
 - **Lens paths in scripts.** When a script's lens path doesn't exist on this machine (a script from another OS, a moved install), the node looks for the same file in `FLARESIM_LENS_PATH`, the bundled `lenses` folder and `~/.nuke/FlareSim/lenses`, first by the path under `lenses/`, then by file name. If it can't find it, the node shows an error rather than rendering no flare.
 - **Shared looks.** Put studio looks in a folder on `FLARESIM_LOOKS_PATH`.
-- **Self-test.** Run `nuke -t /path/to/FlareSim/FlareSim_SelfTest.py` on a workstation and as a farm job (or **Help → FlareSim+ → Self Test** in Nuke). It checks the GPU and driver, plugin loading, the lens library, writable folders and a test render, and writes a text report to your home folder. Add `--script shot.nk` to check a script's lens paths, and `--all` to render every lens. It exits with an error when a check fails.
+- **Self-test.** Run `nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py` on a workstation and as a farm job (or **Help → FlareSim+ → Self Test** in Nuke). It checks the GPU and driver, plugin loading, the lens library, writable folders and a test render, and writes a text report to your home folder. Add `--script shot.nk` to check a script's lens paths, and `--all` to render every lens. It exits with an error when a check fails.
 - **Debug logging.** Errors always go to `~/.nuke/FlareSim/logs/FlareSim_<machine>.log`. For more detail (knob events, panel layout, lens lookups, Lens Browser actions), turn on **Help → FlareSim+ → Debug Logging On or Off**, or set `FLARESIM_DEBUG=1` for a session or farm job. Then repeat the problem and use **Help → FlareSim+ → Save Debug Report**, which writes one text file to your home folder with the setup, the FlareSim+ nodes, the layout of open FlareSim+ panels and the end of the log.
 
 ---

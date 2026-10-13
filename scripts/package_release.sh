@@ -40,20 +40,20 @@ trap 'rm -rf "${STAGE}"' EXIT
 
 for NV in $NUKE_VERSIONS; do
     SRC="${DIST_DIR}/nuke${NV}"
-    if [[ ! -f "${SRC}/FlareSim.${EXT}" || ! -f "${SRC}/FlareSim3D.${EXT}" ]]; then
+    if [[ ! -f "${SRC}/FlareSimPlus.${EXT}" || ! -f "${SRC}/FlareSimPlus3D.${EXT}" ]]; then
         echo "  Nuke ${NV}: plugins not found in ${SRC} — skipping."
         continue
     fi
 
     PKG="${STAGE}/FlareSim"
     rm -rf "${PKG}" && mkdir -p "${PKG}/lenses"
-    cp "${SRC}/FlareSim.${EXT}" "${SRC}/FlareSim3D.${EXT}" "${PKG}/"
+    cp "${SRC}/FlareSimPlus.${EXT}" "${SRC}/FlareSimPlus3D.${EXT}" "${PKG}/"
     if [[ -f "${SRC}/flaresim_preview.${EXT}" ]]; then
         cp "${SRC}/flaresim_preview.${EXT}" "${PKG}/"
     else
         echo "  Nuke ${NV}: flaresim_preview.${EXT} not found — Lens Browser preview will be off."
     fi
-    cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSim_LensBrowser.py" "${REPO_DIR}/nuke/FlareSim_Looks.py" "${REPO_DIR}/nuke/FlareSim_Header.py" "${REPO_DIR}/nuke/FlareSim_SelfTest.py" "${REPO_DIR}/nuke/FlareSim_Log.py" "${PKG}/"
+    cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSimPlus_LensBrowser.py" "${REPO_DIR}/nuke/FlareSimPlus_Looks.py" "${REPO_DIR}/nuke/FlareSimPlus_Header.py" "${REPO_DIR}/nuke/FlareSimPlus_SelfTest.py" "${REPO_DIR}/nuke/FlareSimPlus_Log.py" "${REPO_DIR}/nuke/FlareSimPlus_Convert.py" "${PKG}/"
     cp -r "${REPO_DIR}/nuke/icons" "${PKG}/"
     cp -r "${REPO_DIR}/looks" "${PKG}/"
     cp -r "${REPO_DIR}/lenses/lens_files" "${PKG}/lenses/"

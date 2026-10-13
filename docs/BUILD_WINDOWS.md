@@ -1,6 +1,6 @@
 # Building FlareSim on Windows for Nuke 15
 
-This guide builds `FlareSim.dll` and `FlareSim3D.dll` for Nuke 15.x on Windows, then installs them with the menu entries, the Lens Browser and the lens library. Other Nuke versions use the same steps, but check that version's NDK guide (Appendix A, Windows) for the Visual Studio version it requires.
+This guide builds `FlareSimPlus.dll` and `FlareSimPlus3D.dll` for Nuke 15.x on Windows, then installs them with the menu entries, the Lens Browser and the lens library. Other Nuke versions use the same steps, but check that version's NDK guide (Appendix A, Windows) for the Visual Studio version it requires.
 
 ## 1. Install the tools
 
@@ -73,14 +73,14 @@ The configure step prints a summary. It should look like this:
 
 ```
 FlareSim build configuration
-  Nodes        : FlareSim;FlareSim3D
+  Nodes        : FlareSimPlus;FlareSimPlus3D
   Nuke version : 15.1v5
   Backend      : CUDA 12.8, archs 70;75;86;89;90;100;120, static runtime
 ```
 
 To build a smaller, faster-compiling plugin for just your own GPU, add for example `-DCMAKE_CUDA_ARCHITECTURES=86` (RTX 3000), `89` (RTX 4000) or `120` (RTX 5000).
 
-The output is `build\nuke15\FlareSim.dll` and `build\nuke15\FlareSim3D.dll`.
+The output is `build\nuke15\FlareSimPlus.dll` and `build\nuke15\FlareSimPlus3D.dll`.
 
 ## 5. Install
 
@@ -98,7 +98,7 @@ nuke.pluginAddPath('./plugins/FlareSim')
 
 Restart Nuke 15. You should see:
 
-- **Filter → FlareSim** and **Filter → FlareSim3D** in the node menu
+- **Filter → FlareSim+** and **Filter → FlareSim+ 3D** in the node menu
 - A **Lens Browser** button on each FlareSim node, and **Window → FlareSim+ Lens Browser**, both opening the Lens Browser window on the bundled lens library
 
 ## 6. Quick test in Nuke
@@ -120,7 +120,7 @@ From the same developer prompt:
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -Versions 15
 ```
 
-It finds the newest `Nuke15.*` under `C:\Program Files` and writes `dist\nuke15\FlareSim.dll` and `FlareSim3D.dll`. Use `-Versions 14,15,16` for more versions, or `-NukeRoot "D:\Apps"` for a different install location. Then `scripts\package_release.ps1 -Version 1.0.0` zips each one for a release.
+It finds the newest `Nuke15.*` under `C:\Program Files` and writes `dist\nuke15\FlareSimPlus.dll` and `FlareSimPlus3D.dll`. Use `-Versions 14,15,16` for more versions, or `-NukeRoot "D:\Apps"` for a different install location. Then `scripts\package_release.ps1 -Version 1.0.0` zips each one for a release.
 
 ## Troubleshooting
 
@@ -130,6 +130,6 @@ It finds the newest `Nuke15.*` under `C:\Program Files` and writes `dist\nuke15\
 | `No CUDA toolset found` or `nvcc not found` | The prompt was opened before CUDA was installed, or CUDA isn't on `PATH`. Open a new developer prompt, or reinstall CUDA after Visual Studio. |
 | `unsupported Microsoft Visual Studio version` from nvcc | Your CUDA version is older than your MSVC. Use CUDA 12.4 or newer with the v142 toolset. |
 | `cl` reports 19.3x or 19.4x | That's the VS 2022 compiler. Reopen the prompt with `-vcvars_ver=14.29` (step 3). |
-| Nuke says *"FlareSim.dll: The specified module could not be found"* | Usually a missing or old NVIDIA driver. Update to 528+. |
+| Nuke says *"FlareSimPlus.dll: The specified module could not be found"* | Usually a missing or old NVIDIA driver. Update to 528+. |
 | Nodes don't appear in the menu | `init.py` doesn't add the folder, or `menu.py` isn't next to the DLLs. Re-run the install step. |
 | A stale build after changing options | Delete `build\nuke15` and configure again. |

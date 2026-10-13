@@ -35,7 +35,7 @@ cmake -S . -B build/nuke15 -DCMAKE_BUILD_TYPE=Release -DFLARESIM_BUILD_TESTS=OFF
 cmake --build build/nuke15 -j
 
 mkdir -p dist/nuke15
-cp build/nuke15/FlareSim.dylib build/nuke15/FlareSim3D.dylib build/nuke15/flaresim_preview.dylib dist/nuke15/
+cp build/nuke15/FlareSimPlus.dylib build/nuke15/FlareSimPlus3D.dylib build/nuke15/flaresim_preview.dylib dist/nuke15/
 scripts/package_release.sh --version 1.0.0 --nuke-versions "15"
 ```
 
@@ -55,6 +55,6 @@ The result is `release_packages/FlareSim_v1.0.0_Nuke15_macos.zip`. It unpacks to
    ```
 3. Run the self-test:
    ```bash
-   /Applications/Nuke15.1v3/Nuke15.1v3.app/Contents/MacOS/Nuke15.1 -t ~/.nuke/plugins/FlareSim/FlareSim_SelfTest.py
+   /Applications/Nuke15.1v3/Nuke15.1v3.app/Contents/MacOS/Nuke15.1 -t ~/.nuke/plugins/FlareSim/FlareSimPlus_SelfTest.py
    ```
    It writes `FlareSim_selftest_<machine>_<date>.txt` to your home folder.
