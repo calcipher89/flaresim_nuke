@@ -56,8 +56,8 @@ for NV in $NUKE_VERSIONS; do
     cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSimPlus_LensBrowser.py" "${REPO_DIR}/nuke/FlareSimPlus_Looks.py" "${REPO_DIR}/nuke/FlareSimPlus_Header.py" "${REPO_DIR}/nuke/FlareSimPlus_SelfTest.py" "${REPO_DIR}/nuke/FlareSimPlus_Log.py" "${REPO_DIR}/nuke/FlareSimPlus_Convert.py" "${PKG}/"
     cp -r "${REPO_DIR}/nuke/icons" "${PKG}/"
     cp -r "${REPO_DIR}/looks" "${PKG}/"
-    cp -r "${REPO_DIR}/lenses/lens_files" "${PKG}/lenses/"
-    cp "${REPO_DIR}"/lenses/*.lens "${REPO_DIR}"/lenses/convert_*.py "${PKG}/lenses/"
+    cp -r "${REPO_DIR}/lenses/lens_files" "${REPO_DIR}/lenses/anamorphic" "${PKG}/lenses/"
+    cp "${REPO_DIR}"/lenses/*.lens "${REPO_DIR}"/lenses/convert_*.py "${REPO_DIR}"/lenses/make_anamorphic.py "${PKG}/lenses/"
     cp "${REPO_DIR}/LICENSE" "${PKG}/"
 
     ZIP="${OUT_DIR}/FlareSim_v${VERSION}_Nuke${NV}_${OS}.zip"

@@ -1,0 +1,34 @@
+# Leica Summilux-M 50mm F1.4 Anamorphic 2x
+#
+# Front anamorphic made by lenses/make_anamorphic.py from
+#   Leica_50mm_F1.4_(Leica_Summilux-M_50mm_F1.4).lens
+# A Galilean cylindrical attachment (BK7 glass, coating 0) in front of the
+# original lens.  Horizontal field 2x wider (squeeze 2.000x paraxial), vertical
+# unchanged; focal_length below is the vertical (taking lens) focal length.
+# Not a real product: a plausible design for flare work, not a prescription.
+
+name: Leica Summilux-M 50mm F1.4 Anamorphic 2x
+focal_length: 50
+
+surfaces:
+# radius     thickness   ior      abbe   semi_ap   coating  type
+# --- Front anamorphic attachment: 2x squeeze, cylinder axes vertical ---
+  -51.163    3.000      1.51680  64.2   32.97     0        cyl_y     # plano-concave cylinder, F = -99
+  0          89.658     1.00000  0.0    32.97     0                  # flat back, air gap (solved: afocal)
+  0          11.170     1.51680  64.2   41.22     0                  # flat front of the positive cylinder
+  -102.326   15.000     1.00000  0.0    41.22     0        cyl_y     # plano-convex cylinder, F = +198
+# --- Taking lens ---
+# radius       thickness    ior      abbe     semi_ap   coating
+  46.5310        6.1250       1.79128  47.40    35.840    1
+  209.4575       1.2500       1.00000  0.00     35.840    0
+  21.1635        7.3750       1.64515  57.80    31.880    1
+  75.0470        2.7980       1.69416  30.90    31.880    1
+  15.0010        5.6630       1.00000  0.00     22.140    0
+  stop           4.4620       1.00000  0.00     21.757    0
+  -19.3885       2.0290       1.67158  32.90    21.300    1
+  40.8155        7.6250       1.74793  44.70    24.490    1
+  -29.4425       0.2500       1.00000  0.00     24.490    0
+  291.5940       3.3750       1.79128  47.40    27.260    1
+  -88.2500       0.2500       1.00000  0.00     27.260    0
+  150.1230       2.5480       1.79128  47.40    29.320    1
+  -200.4125      27.2100      1.00000  0.00     29.320    0
