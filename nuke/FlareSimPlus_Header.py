@@ -393,6 +393,23 @@ def _find_header_labels(node):
     return found
 
 
+def _any_header_tags():
+    """The node tags of every FlareSim+ header label in visible windows, for
+    the debug log (a stale tag shows up here)."""
+    tags = []
+    for top in QtWidgets.QApplication.topLevelWidgets():
+        try:
+            if not top.isVisible():
+                continue
+            for l in top.findChildren(QtWidgets.QLabel):
+                m = re.search(r'<!--flaresim:([^>]*)-->', l.text())
+                if m:
+                    tags.append('%s%s' % (m.group(1), '' if l.isVisible() else ' (hidden)'))
+        except RuntimeError:
+            continue
+    return ', '.join(tags) or 'none'
+
+
 def _panel_of(label):
     """The widget holding a node's knobs: the nearest parent of the header
     label that also holds the section titles."""
@@ -947,6 +964,11 @@ def style_panel(node, fit_window=True):
                 found.append((l, panel))
         shown = [f for f in found if _on_screen(f[1])]
         pick = (shown or found or [None])[0]
+        if _log.enabled():
+            _log.debug('panel', '%s: %d header label(s), %d in a knob panel, %d on screen; '
+                       'labels with any FlareSim+ tag: %s', name,
+                       len(_find_header_labels(node)), len(found), len(shown),
+                       _any_header_tags())
         if pick is None:
             if styler is not None and styler.alive():
                 styler.restyle(fit_window=fit_window)
