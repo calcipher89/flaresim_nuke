@@ -320,6 +320,18 @@ Anamorphic lenses produce ghosts and flares with a different shape than spherica
 | `lenses/Anamorphic_Test_50mm_2x.lens` | 2× squeeze, all-`cyl_y` afocal block — exercises the cylinder path |
 | `lenses/Anamorphic_Test_50mm_2x_toric.lens` | Same lens with one cyl_y promoted to `toric` — exercises the toric Newton solver |
 
+### Ready-made anamorphic lenses
+
+`lenses/anamorphic/` has front anamorphics built on real primes: the Leica Summilux-C 40mm and 100mm T1.4, Leica Summilux-M 50mm f/1.4, and Nikkor 35mm and 85mm f/1.4, each at 1.33x, 1.8x and 2x squeeze. They show up under **Anamorphic** in the Lens Browser's type filter. Each one is the original lens with an uncoated Galilean cylindrical attachment in front (like Iscorama-style adapters and classic scope attachments), which gives the horizontal streak. They are plausible designs for flare work, not real products. `focal_length` is the vertical one; the horizontal field of view is the squeeze times wider.
+
+Make your own from any spherical lens with `lenses/make_anamorphic.py`:
+
+```
+python3 lenses/make_anamorphic.py "lenses/lens_files/Canon_85mm_F1.24.lens" --squeeze 1.5 -o Canon_85mm_Anamorphic_1.5x.lens
+```
+
+`--coating 1` gives a single-coated attachment (subtler streak), `--glass sf6` a low-Abbe flint for rainbow ghosts. The air gap is solved so the attachment is exactly afocal, so the lens stays focused at infinity. Then use **Import Lens** in the Lens Browser.
+
 ---
 
 ## Authoring Anamorphic .lens Files
