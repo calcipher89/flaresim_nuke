@@ -585,9 +585,10 @@ class _PanelStyler(QtCore.QObject):
 
     def eventFilter(self, obj, event):
         t = event.type()
-        if t == QtCore.QEvent.Show and obj is not self._panel and _is_folded(obj):
+        if t == QtCore.QEvent.Show and _is_folded(obj) and self._is_page(obj):
             # A tab is coming up with its knobs hidden (Nuke switched tabs
             # without the tab stack saying so): show them straight away.
+            # The panel itself can be a tab page, so it isn't left out.
             self._size_tabs_to_current(showing=obj)
         if t in (QtCore.QEvent.Resize, QtCore.QEvent.Show, QtCore.QEvent.ChildAdded,
                  QtCore.QEvent.LayoutRequest):
@@ -626,10 +627,47 @@ class _PanelStyler(QtCore.QObject):
             if node is not None:
                 refresh(node)
 
+    def _is_page(self, w):
+        stack = self._stack
+        try:
+            return _alive(stack) and stack.indexOf(w) >= 0
+        except RuntimeError:
+            return False
+
+    def _holds_panel(self, page):
+        """True for the tab with the node's own knobs (the FlareSim+ tab)."""
+        try:
+            return page is self._panel or page.isAncestorOf(self._panel)
+        except RuntimeError:
+            return False
+
     def _tab_changed(self, *_args):
         self._size_tabs_to_current()
         self._fit_content_later()
         self._fit_later()
+        # Check again once Nuke has finished switching (on Linux the tab can
+        # come up after the tab stack says it changed).
+        QtCore.QTimer.singleShot(0, self._unfold_visible)
+        QtCore.QTimer.singleShot(150, self._unfold_visible)
+
+    def _unfold_visible(self):
+        """Safety net: a tab on screen never keeps its knobs hidden."""
+        stack = self._stack
+        if not self.alive() or not _alive(stack):
+            return
+        try:
+            pages = [stack.widget(i) for i in range(stack.count())]
+            visible = [p for p in pages if _alive(p) and p.isVisible()]
+            page = stack.currentWidget()
+            if page not in visible:
+                page = visible[0] if len(visible) == 1 else None
+            if page is not None and _is_folded(page):
+                _log.debug('panel', '%s tab %d on screen but folded; unfolding',
+                           self._name, stack.indexOf(page))
+                self._size_tabs_to_current(showing=page)
+                self._fit_content_later()
+        except RuntimeError:
+            pass
 
     def _fit_content_later(self, *_args):
         QtCore.QTimer.singleShot(0, self._fit_content)
@@ -709,7 +747,11 @@ class _PanelStyler(QtCore.QObject):
                 if policy.verticalPolicy() != want:
                     page.setSizePolicy(policy.horizontalPolicy(), want)
                     changed = True
-                if showing:
+                if showing or self._holds_panel(page):
+                    # The FlareSim+ tab's own knobs are never hidden: on
+                    # Linux they could stay hidden after coming back to the
+                    # tab.  Its Ignored size policy still keeps it out of
+                    # the tab stack's height.
                     changed = self._unfold(page) or changed
                 else:
                     changed = self._fold(page) or changed
