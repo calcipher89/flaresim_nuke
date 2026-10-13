@@ -12,6 +12,8 @@ So FlareSim+ keeps the physics and the speed, and puts an artist-friendly layer 
 
 ## What's New
 
+Full version history: [CHANGELOG.md](CHANGELOG.md).
+
 ### FlareSim+ Panel Header
 <img width="519" height="1029" alt="image" src="https://github.com/user-attachments/assets/e564b428-d2d1-4ec2-8d62-34914afe8418" />
 
