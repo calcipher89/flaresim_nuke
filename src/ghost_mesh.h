@@ -167,11 +167,73 @@ FS_MESH_HD void splat_point(float px, float py, float e, int w, int h, Add& add)
     }
 }
 
-// Spread energy e evenly over triangle abc.
+// A triangle to fill at constant density (light per pixel).
+struct FillTri { float ax, ay, bx, by, cx, cy, density; };
+
+// Rows of the frame a fill triangle touches, clipped to [0, h).  False when
+// none.
+FS_MESH_HD bool tri_rows(const FillTri& t, int h, int& y0, int& y1)
+{
+    const float fy0 = fmaxf(0.0f, floorf(fminf(t.ay, fminf(t.by, t.cy))));
+    const float fy1 = fminf((float)(h - 1), ceilf(fmaxf(t.ay, fmaxf(t.by, t.cy))));
+    if (!(fy0 <= fy1)) return false;
+    y0 = (int)fy0;
+    y1 = (int)fy1;
+    return true;
+}
+
+// The pixels of row y whose centres are inside the triangle (edges
+// included), clipped to [0, w): solved from the three edge functions, so
+// filling costs the triangle's area rather than its bounding box.
+FS_MESH_HD bool row_span(const FillTri& t, int y, int w, int& xs, int& xe)
+{
+    const float py = y + 0.5f;
+    const float area2 = (t.bx - t.ax) * (t.cy - t.ay) - (t.by - t.ay) * (t.cx - t.ax);
+    const float sgn = area2 > 0.0f ? 1.0f : -1.0f;
+    const float xs_[3] = { t.ax, t.bx, t.cx }, ys_[3] = { t.ay, t.by, t.cy };
+    float lo = -1.0e30f, hi = 1.0e30f;
+    for (int k = 0; k < 3; ++k)
+    {
+        const int   n  = k == 2 ? 0 : k + 1;
+        const float dx = xs_[n] - xs_[k], dy = ys_[n] - ys_[k];
+        // Inside where a * px + b >= 0.
+        const float a = -sgn * dy;
+        const float b = sgn * (dx * (py - ys_[k]) + dy * xs_[k]);
+        if (a > 0.0f)      lo = fmaxf(lo, -b / a);
+        else if (a < 0.0f) hi = fminf(hi, -b / a);
+        else if (b < 0.0f) return false;
+    }
+    // px = x + 0.5
+    const float fxs = ceilf(fmaxf(lo - 0.5f, -1.0f));
+    const float fxe = floorf(fminf(hi - 0.5f, (float)w));
+    if (!(fxs <= fxe)) return false;
+    xs = fxs < 0.0f ? 0 : (int)fxs;
+    xe = fxe > (float)(w - 1) ? w - 1 : (int)fxe;
+    return xs <= xe;
+}
+
+// Fill a triangle, one row at a time.
 FS_MESH_EXEC_CHECK
 template <class Add>
+FS_MESH_HD void raster_triangle(const FillTri& t, int w, int h, Add& add)
+{
+    int y0, y1;
+    if (!tri_rows(t, h, y0, y1)) return;
+    for (int y = y0; y <= y1; ++y)
+    {
+        int xs, xe;
+        if (!row_span(t, y, w, xs, xe)) continue;
+        for (int x = xs; x <= xe; ++x) add(y * w + x, t.density);
+    }
+}
+
+// Spread energy e evenly over triangle abc.  Small, folded or stretched
+// triangles are drawn as points through add; the rest go to raster(FillTri)
+// to be filled (raster_triangle, or the CUDA kernel's warp-wide fill).
+FS_MESH_EXEC_CHECK
+template <class Add, class Raster>
 FS_MESH_HD void fill_triangle(float ax, float ay, float bx, float by, float cx, float cy,
-                              float e, float max_edge, int w, int h, Add& add)
+                              float e, float max_edge, int w, int h, Add& add, Raster& raster)
 {
     if (longest_edge(ax, ay, bx, by, cx, cy) > max_edge)
     {
@@ -205,27 +267,12 @@ FS_MESH_HD void fill_triangle(float ax, float ay, float bx, float by, float cx, 
         }
         return;
     }
-    const float fx0 = fmaxf(0.0f, floorf(fminf(ax, fminf(bx, cx))));
-    const float fx1 = fminf((float)(w - 1), ceilf(fmaxf(ax, fmaxf(bx, cx))));
-    const float fy0 = fmaxf(0.0f, floorf(fminf(ay, fminf(by, cy))));
-    const float fy1 = fminf((float)(h - 1), ceilf(fmaxf(ay, fmaxf(by, cy))));
-    if (fx0 > fx1 || fy0 > fy1) return;
-    const int x0 = (int)fx0, x1 = (int)fx1, y0 = (int)fy0, y1 = (int)fy1;
-    const float density = e / area;
-    const float sgn = area2 > 0.0f ? 1.0f : -1.0f;
-    for (int y = y0; y <= y1; ++y)
-    {
-        const float py = y + 0.5f;
-        for (int x = x0; x <= x1; ++x)
-        {
-            const float px = x + 0.5f;
-            const float e0 = sgn * ((bx - ax) * (py - ay) - (by - ay) * (px - ax));
-            const float e1 = sgn * ((cx - bx) * (py - by) - (cy - by) * (px - bx));
-            const float e2 = sgn * ((ax - cx) * (py - cy) - (ay - cy) * (px - cx));
-            if (e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f)
-                add(y * w + x, density);
-        }
-    }
+    // Entirely off the frame: nothing to fill.
+    if (fmaxf(ax, fmaxf(bx, cx)) < 0.0f || fminf(ax, fminf(bx, cx)) > (float)w ||
+        fmaxf(ay, fmaxf(by, cy)) < 0.0f || fminf(ay, fminf(by, cy)) > (float)h)
+        return;
+    const FillTri t = { ax, ay, bx, by, cx, cy, e / area };
+    raster(t);
 }
 
 // One traced lattice vertex: pixel position and Fresnel weight, w < 0 when
@@ -285,10 +332,10 @@ FS_MESH_HD void edge_cut(const float* uv_in, const float* uv_out, Trace& trace,
 }
 
 FS_MESH_EXEC_CHECK
-template <class Trace, class Add>
+template <class Trace, class Add, class Raster>
 FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], const Vertex vx[3],
                               float scale, float inv_iris_area, float max_edge,
-                              int w, int h, Trace& trace, Add& add)
+                              int w, int h, Trace& trace, Add& add, Raster& raster)
 {
     if (!in_lattice[0] || !in_lattice[1] || !in_lattice[2]) return;
     int ok[3], lost[3], n_ok = 0, n_lost = 0;
@@ -305,7 +352,7 @@ FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], co
         const float wts[3] = { a.w, b.w, c.w };
         const float e = scale * triangle_share(tuv, wts, inv_iris_area);
         if (e > 0.0f)
-            fill_triangle(a.x, a.y, b.x, b.y, c.x, c.y, e, max_edge, w, h, add);
+            fill_triangle(a.x, a.y, b.x, b.y, c.x, c.y, e, max_edge, w, h, add, raster);
     };
 
     if (n_ok == 3)
@@ -332,6 +379,17 @@ FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], co
     edge_cut(uv[a], uv[b], trace, ub, vb, vx[a]);
     edge_cut(uv[a], uv[c], trace, uc, vc, vx[a]);
     fill(uv[a], ub, uc, vx[a], vb, vc);
+}
+
+// draw_triangle filling on the spot with raster_triangle (the CPU path).
+FS_MESH_EXEC_CHECK
+template <class Trace, class Add>
+FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], const Vertex vx[3],
+                              float scale, float inv_iris_area, float max_edge,
+                              int w, int h, Trace& trace, Add& add)
+{
+    auto raster = [&](const FillTri& t) { raster_triangle(t, w, h, add); };
+    draw_triangle(uv, in_lattice, vx, scale, inv_iris_area, max_edge, w, h, trace, add, raster);
 }
 
 } // namespace ghost_mesh

@@ -1278,11 +1278,12 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
         s_max_edge = ghost_mesh::max_edge_from_hist(d_hist + b * ghost_mesh::kEdgeBins);
     __syncthreads();
 
+    // The whole block draws one mesh, so this exit is block-uniform.
     const float max_edge = s_max_edge;
+    if (max_edge <= 0.0f) return;
     const int m     = ghost_mesh::lattice_size(f.n_cells);
     const int cells = (m - 1) * (m - 1);
     const int c     = (int)(blockIdx.x * blockDim.x + threadIdx.x);
-    if (c >= cells || max_edge <= 0.0f) return;
 
     const GPUMesh mesh = d_meshes[mesh0 + b];
     const GPUPair pair = d_pairs[mesh.pair];
@@ -1299,25 +1300,101 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
         return d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, out);
     };
 
-    int tri[2][3];
-    ghost_mesh::cell_triangles(c % (m - 1), c / (m - 1), m, tri);
-    for (int t = 0; t < 2; ++t)
+    // Each thread works out its cell's triangles (small ones are drawn as
+    // points straight away) and keeps the ones to fill: at most two per
+    // triangle, so four per cell.  Lanes past the last cell keep none but
+    // still join the warp-wide fill below.
+    ghost_mesh::FillTri fills[4];
+    int n_fills = 0;
+    auto keep = [&](const ghost_mesh::FillTri& t) { if (n_fills < 4) fills[n_fills++] = t; };
+
+    if (c < cells)
     {
-        float uv[3][2];
-        bool  in_lattice[3];
-        ghost_mesh::Vertex vx[3];
-        bool  any = false;
-        for (int q = 0; q < 3; ++q)
+        int tri[2][3];
+        ghost_mesh::cell_triangles(c % (m - 1), c / (m - 1), m, tri);
+        for (int t = 0; t < 2; ++t)
         {
-            const int k = tri[t][q];
-            in_lattice[q] = ghost_mesh::vertex_uv(k % m, k / m, f.n_cells, f.off_u, f.off_v,
-                                                  f.iris, uv[q][0], uv[q][1]);
-            vx[q] = verts[k];
-            any = any || vx[q].w >= 0.0f;
+            float uv[3][2];
+            bool  in_lattice[3];
+            ghost_mesh::Vertex vx[3];
+            bool  any = false;
+            for (int q = 0; q < 3; ++q)
+            {
+                const int k = tri[t][q];
+                in_lattice[q] = ghost_mesh::vertex_uv(k % m, k / m, f.n_cells, f.off_u, f.off_v,
+                                                      f.iris, uv[q][0], uv[q][1]);
+                vx[q] = verts[k];
+                any = any || vx[q].w >= 0.0f;
+            }
+            if (!any) continue;
+            ghost_mesh::draw_triangle(uv, in_lattice, vx, 1.0f, inv_area, max_edge,
+                                      w, h, trace, add, keep);
         }
-        if (!any) continue;
-        ghost_mesh::draw_triangle(uv, in_lattice, vx, 1.0f, inv_area, max_edge,
-                                  w, h, trace, add);
+    }
+
+    // Warp-wide fill: the 32 lanes fill each kept triangle together, one
+    // after another, so a big triangle doesn't hold up its warp while one
+    // lane fills it alone.  Rows go 32 at a time: each lane finds one row's
+    // span, a prefix sum lines the spans up, and the lanes then walk those
+    // pixels 32 at a time, so neighbouring lanes write neighbouring pixels.
+    __syncwarp();
+    const unsigned kAll = 0xffffffffu;
+    const int lane = (int)(threadIdx.x & 31);
+    for (int src = 0; src < 32; ++src)
+    {
+        const int count = __shfl_sync(kAll, n_fills, src);
+        for (int i = 0; i < count; ++i)
+        {
+            ghost_mesh::FillTri t;
+            t.ax      = __shfl_sync(kAll, fills[i].ax, src);
+            t.ay      = __shfl_sync(kAll, fills[i].ay, src);
+            t.bx      = __shfl_sync(kAll, fills[i].bx, src);
+            t.by      = __shfl_sync(kAll, fills[i].by, src);
+            t.cx      = __shfl_sync(kAll, fills[i].cx, src);
+            t.cy      = __shfl_sync(kAll, fills[i].cy, src);
+            t.density = __shfl_sync(kAll, fills[i].density, src);
+
+            int y0, y1;
+            if (!ghost_mesh::tri_rows(t, h, y0, y1)) continue;   // warp-uniform
+            for (int yb = y0; yb <= y1; yb += 32)
+            {
+                // This lane's row.
+                int xs = 0, len = 0;
+                {
+                    int a, e;
+                    if (yb + lane <= y1 && ghost_mesh::row_span(t, yb + lane, w, a, e))
+                    {
+                        xs  = a;
+                        len = e - a + 1;
+                    }
+                }
+                // Inclusive prefix sum of row lengths across the warp.
+                int incl = len;
+                for (int o = 1; o < 32; o <<= 1)
+                {
+                    const int v = __shfl_up_sync(kAll, incl, o);
+                    if (lane >= o) incl += v;
+                }
+                const int total = __shfl_sync(kAll, incl, 31);
+                for (int base = 0; base < total; base += 32)
+                {
+                    const int k = base + lane;
+                    // Row r holding pixel k: the number of rows whose
+                    // prefix sum is <= k.
+                    int r = 0;
+                    for (int step = 16; step > 0; step >>= 1)
+                    {
+                        const int v = __shfl_sync(kAll, incl, r + step - 1);
+                        if (v <= k) r += step;
+                    }
+                    const int r_incl = __shfl_sync(kAll, incl, r);
+                    const int r_len  = __shfl_sync(kAll, len, r);
+                    const int r_xs   = __shfl_sync(kAll, xs, r);
+                    if (k < total)
+                        add((yb + r) * w + r_xs + (k - (r_incl - r_len)), t.density);
+                }
+            }
+        }
     }
 }
 
