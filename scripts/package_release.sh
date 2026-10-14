@@ -53,7 +53,7 @@ for NV in $NUKE_VERSIONS; do
     else
         echo "  Nuke ${NV}: flaresim_preview.${EXT} not found — Lens Browser preview will be off."
     fi
-    cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSimPlus_LensBrowser.py" "${REPO_DIR}/nuke/FlareSimPlus_Looks.py" "${REPO_DIR}/nuke/FlareSimPlus_Header.py" "${REPO_DIR}/nuke/FlareSimPlus_SelfTest.py" "${REPO_DIR}/nuke/FlareSimPlus_Log.py" "${REPO_DIR}/nuke/FlareSimPlus_Convert.py" "${PKG}/"
+    cp "${REPO_DIR}/nuke/menu.py" "${REPO_DIR}/nuke/FlareSimPlus_LensBrowser.py" "${REPO_DIR}/nuke/FlareSimPlus_Looks.py" "${REPO_DIR}/nuke/FlareSimPlus_Header.py" "${REPO_DIR}/nuke/FlareSimPlus_SelfTest.py" "${REPO_DIR}/nuke/FlareSimPlus_Log.py" "${REPO_DIR}/nuke/FlareSimPlus_Convert.py" "${REPO_DIR}/nuke/FlareSimPlus_Preview.py" "${PKG}/"
     cp -r "${REPO_DIR}/nuke/icons" "${PKG}/"
     cp -r "${REPO_DIR}/looks" "${PKG}/"
     cp -r "${REPO_DIR}/lenses/lens_files" "${REPO_DIR}/lenses/anamorphic" "${PKG}/lenses/"

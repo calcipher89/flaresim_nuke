@@ -2,6 +2,15 @@
 
 Major updates and bug fixes for FlareSim+, newest first. Version numbers match the release zips made with `scripts/package_release.sh --version <x.y.z>`. Pull request numbers link to the full details.
 
+## Unreleased
+
+### Added
+- Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
+- Viewer Quality: a lower Quality for the Viewer only; renders always use full Quality. (#46)
+
+### Changed
+- Smooth renders much faster, about 7x with many Auto Detect lights. (#44, #45)
+
 ## 1.2.0 (2026-10-13)
 
 ### Added

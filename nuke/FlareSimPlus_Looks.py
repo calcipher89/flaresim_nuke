@@ -64,7 +64,7 @@ LOOK_KNOBS = (
 
 # Render settings a look no longer carries.  Older look files still list
 # them; applying a look leaves the node's Quality alone.
-SKIPPED_KNOBS = ('ray_grid',)
+SKIPPED_KNOBS = ('ray_grid', 'viewer_quality', 'render_full')
 
 # Per-surface override knobs (Surfaces tab) and their defaults.
 MAX_SURFS = 50

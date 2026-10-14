@@ -363,7 +363,7 @@ install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     LIBRARY DESTINATION .)
 install(FILES nuke/menu.py nuke/FlareSimPlus_LensBrowser.py nuke/FlareSimPlus_Looks.py
     nuke/FlareSimPlus_Header.py nuke/FlareSimPlus_SelfTest.py nuke/FlareSimPlus_Log.py
-    nuke/FlareSimPlus_Convert.py DESTINATION .)
+    nuke/FlareSimPlus_Convert.py nuke/FlareSimPlus_Preview.py DESTINATION .)
 install(DIRECTORY nuke/icons/ DESTINATION icons
     FILES_MATCHING PATTERN "*.png")
 install(DIRECTORY looks/ DESTINATION looks
