@@ -78,6 +78,15 @@ struct GhostConfig
     // for temporal anti-aliasing of the jitter pattern).  Ignored when
     // pupil_jitter != 1 (stratified mode).
     int pupil_jitter_seed = 0;
+
+    // Asked between GPU batches of a long render; returning true stops the
+    // render early (the output is then incomplete and must not be used).
+    // The node passes Nuke's abort state, so a render the Viewer has
+    // cancelled doesn't keep the GPU, and the next knob change, waiting.
+    bool (*should_stop)(void* ctx) = nullptr;
+    void* stop_ctx = nullptr;
+
+    bool stop_requested() const { return should_stop && should_stop(stop_ctx); }
 };
 
 // Enumerate all valid ghost bounce pairs for the lens system.

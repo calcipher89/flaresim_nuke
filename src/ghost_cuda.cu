@@ -1493,10 +1493,11 @@ __global__ void mesh_fill_kernel(const GPUMesh* d_meshes, int mesh0, MeshFrame f
 }
 
 // Smooth render of every (pair, source, wavelength) into d_out_r/g/b.
-// Returns false (with the error reported) on a CUDA failure.
+// Returns false (with the error reported) on a CUDA failure.  Stops early,
+// leaving the output incomplete, when config.stop_requested() turns true.
 static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& frame,
                           const Surface* d_surfs, int n_surfs, const GPUPair* d_pairs,
-                          GpuBufferCache& cache,
+                          GpuBufferCache& cache, const GhostConfig& config,
                           const std::function<void(cudaError_t, const char*)>& report)
 {
     if (meshes.empty()) return true;
@@ -1541,12 +1542,27 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
     uint32_t* d_count = d_queue + (queue_bytes * batch) / sizeof(uint32_t);
     const int cells = (m - 1) * (m - 1);
 
-    for (int mesh0 = 0; mesh0 < (int)meshes.size(); mesh0 += batch)
+    // With a stop check, keep at most two batches queued on the GPU so a
+    // stop request (Nuke cancelling the render) is seen within a batch or
+    // two instead of after the whole frame.  Two keep the GPU busy.
+    cudaEvent_t done[2] = { nullptr, nullptr };
+    const bool can_stop = config.should_stop != nullptr;
+    if (can_stop)
+        for (auto& ev : done)
+            if (cudaEventCreateWithFlags(&ev, cudaEventDisableTiming) != cudaSuccess) ev = nullptr;
+    auto free_events = [&] { for (auto& ev : done) if (ev) { cudaEventDestroy(ev); ev = nullptr; } };
+
+    for (int mesh0 = 0, b = 0; mesh0 < (int)meshes.size(); mesh0 += batch, ++b)
     {
+        if (can_stop && b >= 2 && done[b % 2])
+        {
+            cudaEventSynchronize(done[b % 2]);
+            if (config.stop_requested()) break;
+        }
         const int nb = std::min(batch, (int)meshes.size() - mesh0);
         e = cudaMemset(d_hist, 0, hist_bytes * nb);
         if (e == cudaSuccess) e = cudaMemset(d_count, 0, sizeof(uint32_t));
-        if (e != cudaSuccess) { report(e, "clear mesh histogram"); return false; }
+        if (e != cudaSuccess) { free_events(); report(e, "clear mesh histogram"); return false; }
 
         const dim3 vgrid((unsigned)((m * m + MESH_BLOCK - 1) / MESH_BLOCK), (unsigned)nb, 1);
         const dim3 cgrid((unsigned)((cells + MESH_BLOCK - 1) / MESH_BLOCK), (unsigned)nb, 1);
@@ -1560,9 +1576,11 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
         mesh_fill_kernel<<<cgrid, MESH_BLOCK>>>(d_meshes, mesh0, frame, d_verts, d_hist,
                                                 d_cuts,
                                                 cache.d_out_r, cache.d_out_g, cache.d_out_b);
+        if (can_stop && done[b % 2]) cudaEventRecord(done[b % 2]);
         e = cudaGetLastError();
-        if (e != cudaSuccess) { report(e, "smooth ghost kernels"); return false; }
+        if (e != cudaSuccess) { free_events(); report(e, "smooth ghost kernels"); return false; }
     }
+    free_events();
     return true;
 }
 
@@ -2104,7 +2122,7 @@ void launch_ghost_cuda(
         frame.iris = iris;
 
         if (!render_smooth(meshes, frame, static_cast<const Surface*>(cache.d_surfs), n_surfs,
-                           static_cast<const GPUPair*>(cache.d_pairs), cache, report))
+                           static_cast<const GPUPair*>(cache.d_pairs), cache, config, report))
             return;
     }
     else

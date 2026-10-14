@@ -7,9 +7,14 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 ### Added
 - Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
 - Viewer Quality: a lower Quality for the Viewer only; renders always use full Quality. (#46)
+- `FLARESIM_TRACE_LOG`: set it to a file path and both nodes log each update, compute (and whether Nuke cancelled it) and first row served, for tracking down Viewer refresh problems.
 
 ### Changed
 - Smooth renders much faster, about 7x with many Auto Detect lights. (#44, #45)
+- A render Nuke cancels (a knob changed mid-render) now stops within a GPU batch or two instead of finishing the frame, so changing knobs at High no longer stalls the UI for seconds.
+
+### Fixed
+- The Viewer could stay black for a frame after a parameter change until the frame changed: a compute Nuke cancelled part way was kept as the finished result.
 
 ## 1.2.0 (2026-10-13)
 

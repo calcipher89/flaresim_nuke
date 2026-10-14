@@ -235,6 +235,7 @@ CI runs this test, compiles the CUDA kernels and checks the Python files on ever
 - **Shared looks.** Put studio looks in a folder on `FLARESIM_LOOKS_PATH`.
 - **Self-test.** Run `nuke -t /path/to/FlareSim/FlareSimPlus_SelfTest.py` on a workstation and as a farm job (or **Help → FlareSim+ → Self Test** in Nuke). It checks the GPU and driver, plugin loading, the lens library, writable folders and a test render, and writes a text report to your home folder. Add `--script shot.nk` to check a script's lens paths, and `--all` to render every lens. It exits with an error when a check fails.
 - **Debug logging.** Errors always go to `~/.nuke/FlareSim/logs/FlareSim_<machine>.log`. For more detail (knob events, panel layout, lens lookups, Lens Browser actions), turn on **Help → FlareSim+ → Debug Logging On or Off**, or set `FLARESIM_DEBUG=1` for a session or farm job. Then repeat the problem and use **Help → FlareSim+ → Save Debug Report**, which writes one text file to your home folder with the setup, the FlareSim+ nodes, the layout of open FlareSim+ panels and the end of the log.
+- **Render trace.** For Viewer refresh problems (a flare that goes black or doesn't update), start Nuke with `FLARESIM_TRACE_LOG` set to a file path, e.g. `FLARESIM_TRACE_LOG=$HOME/flaresim_trace.log`. Both nodes then log each update, each compute (why it ran, whether Nuke cancelled it, how long it took, any CUDA error) and the first rows served for each new state; a row served without a flare is marked `<<< BLACK`. Unset, it costs nothing.
 
 ---
 
