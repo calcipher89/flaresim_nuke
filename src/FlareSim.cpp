@@ -30,6 +30,7 @@
 #include "blur_cuda.h"
 #include "extras.h"
 #include "layers.h"
+#include "trace_log.h"
 
 // Set to 1 to enable per-frame profiler output to stderr.
 #define FLARESIM_PROFILE 0
@@ -410,6 +411,7 @@ public:
     bool        needs_compute_ = false;
     int         pending_frame_ = -1;     // frame number this pending state belongs to
     int         cache_frame_   = -1;     // frame number the current cache holds
+    uint64_t    trace_served_hash_ = 0;  // FLARESIM_TRACE_LOG: last state logged as served
     int         pending_x0_    = 0;
     int         pending_y0_    = 0;
     int         pending_x1_    = 0;
@@ -1383,6 +1385,13 @@ public:
             }
             capture_pending_state();
             needs_compute_ = true;
+            if (flaresim::trace_enabled())
+                flaresim::trace(node_name().c_str(), this,
+                                "VALIDATE frame=%d hash=%016llx quality=%d viewer_quality=%d "
+                                "render_full=%d gui=%d bbox=%dx%d",
+                                pending_frame_, (unsigned long long)hash().value(), quality_,
+                                viewer_quality_, (int)render_full_,
+                                (int)DD::Image::Application::IsGUIActive(), pending_w_, pending_h_);
         }
     }
 
@@ -1803,6 +1812,10 @@ public:
         const float sensor_half_h = lens_.focal_length * std::tan(fov_v * 0.5f);
 
         GhostConfig cfg;
+        // Stop the GPU render early when Nuke cancels this one (a knob
+        // changed, or the Viewer moved on).
+        cfg.should_stop = [](void* op) { return static_cast<const Op*>(op)->aborted(); };
+        cfg.stop_ctx    = this;
         cfg.ray_grid              = flaresim::effective_ray_grid(quality_, ray_grid_, pending_fmt_w_);
         // Viewer Quality: only in the GUI and only when no Write is rendering.
         if (DD::Image::Application::IsGUIActive() && !render_full_)
@@ -1943,6 +1956,9 @@ public:
                           &pair_colors_, &pair_offsets_, &pair_scales_);
         PROF_END();
 
+        // Cancelled during the GPU render: its output is incomplete.
+        if (Op::aborted()) { zero_buffers(); return; }
+
         PROF_BEGIN("gpu_blur_alpha_readback");
         {
             int radius = 0;
@@ -1978,13 +1994,49 @@ public:
             // for a different frame without validating it again, for example
             // in the viewer after a Write render. Skipping it here would
             // output black, and Nuke would keep that black in its cache.
-            if (needs_compute_ || cache_frame_ != cur_frame) {
+            //
+            // A render Nuke has cancelled (a knob changed, the Viewer moved
+            // on) doesn't compute, and a compute it cancels part way is
+            // never kept: do_compute() leaves black buffers then, and
+            // marking them done would show black for this frame until the
+            // frame changed.  The next request computes again.
+            if ((needs_compute_ || cache_frame_ != cur_frame) && !Op::aborted()) {
+                const bool reason_validate = needs_compute_;
                 if (pending_frame_ != cur_frame)
                     capture_pending_state();
                 needs_compute_ = false;
                 if (pending_w_ > 0 && pending_h_ > 0) {
+                    const auto t0 = std::chrono::steady_clock::now();
                     do_compute();
-                    cache_frame_ = cur_frame;
+                    const bool cancelled = Op::aborted();
+                    if (cancelled) {
+                        needs_compute_ = true;
+                        cache_frame_   = -1;
+                    } else {
+                        cache_frame_ = cur_frame;
+                    }
+                    if (flaresim::trace_enabled())
+                        flaresim::trace(node_name().c_str(), this,
+                                        "COMPUTE frame=%d hash=%016llx reason=%s cancelled=%d "
+                                        "ms=%.0f cuda_error=%d",
+                                        cur_frame, (unsigned long long)hash().value(),
+                                        reason_validate ? "validate" : "frame_change",
+                                        (int)cancelled,
+                                        std::chrono::duration<double, std::milli>(
+                                            std::chrono::steady_clock::now() - t0).count(),
+                                        (int)!pending_cuda_error_.empty());
+                }
+            }
+            // First row handed out for each new state.
+            if (flaresim::trace_enabled() && !Op::aborted()) {
+                const uint64_t h = hash().value();
+                if (h != trace_served_hash_) {
+                    trace_served_hash_ = h;
+                    flaresim::trace(node_name().c_str(), this,
+                                    "SERVE frame=%d hash=%016llx have_flare=%d%s",
+                                    cur_frame, (unsigned long long)h,
+                                    (int)(cache_frame_ == cur_frame),
+                                    cache_frame_ == cur_frame ? "" : "  <<< BLACK");
                 }
             }
         }
