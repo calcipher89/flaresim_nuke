@@ -47,6 +47,10 @@ constexpr float kMaxStretch = 16.0f;
 // Edge-length histogram for that median: quarter-octave bins from 1/16 px.
 constexpr int kEdgeBins = 96;
 
+// Triangles covering at most this many pixels of bounding box are filled by
+// their own thread; bigger ones are shared out across the warp.
+constexpr int kLaneFillPixels = 32;
+
 // Vertices per side of the lattice for a ray grid of n cells.  One spare
 // ring each side, so the lattice covers the iris for any sub-cell offset.
 FS_MESH_HD int lattice_size(int n) { return n + 3; }

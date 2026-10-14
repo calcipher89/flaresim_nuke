@@ -1300,13 +1300,21 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
         return d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, out);
     };
 
-    // Each thread works out its cell's triangles (small ones are drawn as
-    // points straight away) and keeps the ones to fill: at most two per
-    // triangle, so four per cell.  Lanes past the last cell keep none but
-    // still join the warp-wide fill below.
+    // Each thread works out its cell's triangles.  Tiny ones are drawn as
+    // points and small ones filled by the thread straight away; it keeps
+    // the bigger ones for the warp: at most two per triangle, so four per
+    // cell.  Lanes past the last cell keep none but still join the
+    // warp-wide fill below.
     ghost_mesh::FillTri fills[4];
     int n_fills = 0;
-    auto keep = [&](const ghost_mesh::FillTri& t) { if (n_fills < 4) fills[n_fills++] = t; };
+    auto keep = [&](const ghost_mesh::FillTri& t) {
+        const float bw = fmaxf(t.ax, fmaxf(t.bx, t.cx)) - fminf(t.ax, fminf(t.bx, t.cx)) + 1.0f;
+        const float bh = fmaxf(t.ay, fmaxf(t.by, t.cy)) - fminf(t.ay, fminf(t.by, t.cy)) + 1.0f;
+        if (bw * bh <= (float)ghost_mesh::kLaneFillPixels || n_fills >= 4)
+            ghost_mesh::raster_triangle(t, w, h, add);
+        else
+            fills[n_fills++] = t;
+    };
 
     if (c < cells)
     {
