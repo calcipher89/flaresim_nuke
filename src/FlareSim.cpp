@@ -831,6 +831,8 @@ public:
         Enumeration_knob(f, &viewer_quality_, flaresim::kViewerQualityNames,
                          "viewer_quality", "Viewer Quality");
         Tooltip(f, flaresim::kViewerQualityTooltip);
+        // Clear a stuck render_full even when the panel is closed.
+        SetFlags(f, Knob::KNOB_CHANGED_ALWAYS);
         // Set by FlareSimPlus_Preview.py while a Write renders in the GUI;
         // never saved, so a script always opens with it off.
         Bool_knob(f, &render_full_, "render_full", "");
@@ -1803,7 +1805,7 @@ public:
         GhostConfig cfg;
         cfg.ray_grid              = flaresim::effective_ray_grid(quality_, ray_grid_, pending_fmt_w_);
         // Viewer Quality: only in the GUI and only when no Write is rendering.
-        if (DD::Image::Application::gui && !render_full_)
+        if (DD::Image::Application::IsGUIActive() && !render_full_)
             cfg.ray_grid = flaresim::viewer_ray_grid(cfg.ray_grid, viewer_quality_,
                                                      pending_fmt_w_);
         cfg.ghost_render          = ghost_render_;
