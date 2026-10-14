@@ -11,13 +11,15 @@
 
 import nuke
 
+# New nodes start on Ghost Render: Smooth.  The knob itself defaults to
+# Points so scripts saved before Smooth existed render as they did.
 nuke.menu('Nodes').addCommand(
     'Filter/FlareSim+',
-    'nuke.createNode("FlareSimPlus")',
+    'nuke.createNode("FlareSimPlus", "ghost_render Smooth")',
 )
 nuke.menu('Nodes').addCommand(
     'Filter/FlareSim+ 3D',
-    'nuke.createNode("FlareSimPlus3D")',
+    'nuke.createNode("FlareSimPlus3D", "ghost_render Smooth")',
 )
 
 try:

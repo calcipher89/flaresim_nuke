@@ -64,6 +64,11 @@ struct GhostConfig
     // 0 = Value (max RGB), 1 = Luminance (Rec.709), 2 = Lightness (cube root)
     int   highlight_metric = 1;
 
+    // How ghosts are drawn.  0 = Points: every ray is a dot (grainy on large
+    // ghosts unless ray_grid is very high).  1 = Smooth: rays on neighbouring
+    // pupil grid points form triangles that are filled (ghost_mesh.h).
+    int ghost_render = 0;
+
     // Entrance-pupil sampling pattern.
     // 0 = regular grid (default), 1 = stratified jitter, 2 = Halton quasi-random.
     int pupil_jitter = 0;

@@ -24,6 +24,7 @@
 #include "lens.h"       // Surface (POD) — uploaded to device
 #include "ghost.h"      // BrightPixel, GhostPair, GhostConfig (host side)
 #include "trace.h"      // trace_ghost_ray — used for tile centroid computation
+#include "ghost_mesh.h" // Smooth ghost render: lattice, stretch test, triangle fill
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
@@ -33,6 +34,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <string>
 #ifndef _WIN32
@@ -69,6 +71,11 @@ void GpuBufferCache::release()
     out_floats = 0;
     cudaFree(d_out_fp16);  d_out_fp16 = nullptr;
     d_out_fp16_elems = 0;
+
+    // Smooth ghost render
+    cudaFree(d_meshes);      d_meshes     = nullptr;  meshes_bytes     = 0;
+    cudaFree(d_mesh_verts);  d_mesh_verts = nullptr;  mesh_verts_bytes = 0;
+    cudaFree(d_mesh_hist);   d_mesh_hist  = nullptr;  mesh_hist_bytes  = 0;
 
     // Blur resources
     cudaFree(blur_a);  blur_a = nullptr;
@@ -1126,6 +1133,254 @@ __global__ void ghost_kernel(
 }
 
 // ===========================================================================
+// Smooth kernels (Ghost Render: Smooth) — see ghost_mesh.h
+//
+// Each mesh is one (pair, source, wavelength).  Meshes go through in
+// batches sized to a memory budget:
+//   mesh_trace_kernel   traces every lattice vertex          (vertex, mesh)
+//   mesh_hist_kernel    edge-length histogram per mesh       (cell, mesh)
+//   mesh_fill_kernel    fills each cell's two triangles      (cell, mesh)
+// ===========================================================================
+
+struct GPUMesh
+{
+    int   pair;                   // index into the sorted pair array
+    float lambda;
+    float dir_x, dir_y, dir_z;    // beam direction
+    float cr, cg, cb;             // gain × boost × source × spectral × tint
+    float min_weight;             // early-out for rays too dim to see
+};
+
+// Where the lens and the image sit, the same for every mesh.
+struct MeshFrame
+{
+    float front_R, start_z, sensor_z;
+    float sensor_half_w, sensor_half_h;
+    float fmt_w, fmt_h, fmt_x0, fmt_y0;
+    int   width, height;
+    int   n_cells;
+    float off_u, off_v;
+    ghost_mesh::Iris iris;
+};
+
+static constexpr int MESH_BLOCK = 256;
+
+__device__ __forceinline__
+void d_load_surfaces(Surface* s_surfs, const Surface* d_surfs, int n)
+{
+    for (int i = (int)threadIdx.x; i < n; i += (int)blockDim.x)
+        s_surfs[i] = d_surfs[i];
+}
+
+// Trace one pupil ray of a mesh to a pixel position; false when it is lost.
+__device__ __forceinline__
+bool d_mesh_ray(const Surface* surfs, int n_surfs, const GPUPair& pair,
+                const GPUMesh& mesh, const MeshFrame& f,
+                float u, float v, ghost_mesh::Vertex& out)
+{
+    DRay ray;
+    ray.origin = dv(u * f.front_R, v * f.front_R, f.start_z);
+    ray.dir    = dv(mesh.dir_x, mesh.dir_y, mesh.dir_z);
+    const DTraceResult res = d_trace_ghost_ray(ray, surfs, n_surfs, f.sensor_z,
+                                               pair.surf_a, pair.surf_b,
+                                               mesh.lambda, mesh.min_weight);
+    if (!res.valid || !(res.weight > 0.0f)) return false;
+    if (!isfinite(res.position.x) || !isfinite(res.position.y)) return false;
+
+    // Sensor (mm) → pixel, then the per-pair scale and offset, as in
+    // ghost_kernel.
+    float px = (res.position.x / (2.0f * f.sensor_half_w) + 0.5f) * f.fmt_w + f.fmt_x0;
+    float py = (res.position.y / (2.0f * f.sensor_half_h) + 0.5f) * f.fmt_h + f.fmt_y0;
+    const float fcx = f.fmt_x0 + f.fmt_w * 0.5f;
+    const float fcy = f.fmt_y0 + f.fmt_h * 0.5f;
+    px = fcx + (px - fcx) * pair.scale + pair.offset_x;
+    py = fcy + (py - fcy) * pair.scale + pair.offset_y;
+    if (!isfinite(px) || !isfinite(py)) return false;
+
+    out.x = fmaxf(-1.0e7f, fminf(1.0e7f, px));
+    out.y = fmaxf(-1.0e7f, fminf(1.0e7f, py));
+    out.w = res.weight;
+    return true;
+}
+
+__global__ void mesh_trace_kernel(const Surface* d_surfs, int n_surfs,
+                                  const GPUPair* d_pairs, const GPUMesh* d_meshes,
+                                  int mesh0, MeshFrame f, ghost_mesh::Vertex* d_verts)
+{
+    __shared__ Surface s_surfs[MAX_SURFACES];
+    const int n = (n_surfs <= MAX_SURFACES) ? n_surfs : MAX_SURFACES;
+    d_load_surfaces(s_surfs, d_surfs, n);
+    __syncthreads();
+
+    const int m = ghost_mesh::lattice_size(f.n_cells);
+    const int k = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (k >= m * m) return;
+    const int b = (int)blockIdx.y;
+    const GPUMesh mesh = d_meshes[mesh0 + b];
+    const GPUPair pair = d_pairs[mesh.pair];
+
+    ghost_mesh::Vertex vx;
+    vx.x = vx.y = 0.0f;
+    vx.w = -1.0f;
+    float u, v;
+    if (ghost_mesh::vertex_uv(k % m, k / m, f.n_cells, f.off_u, f.off_v, f.iris, u, v))
+    {
+        ghost_mesh::Vertex hit;
+        if (d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, hit)) vx = hit;
+    }
+    d_verts[(size_t)b * m * m + k] = vx;
+}
+
+__global__ void mesh_hist_kernel(const ghost_mesh::Vertex* d_verts, int n_cells,
+                                 uint32_t* d_hist)
+{
+    __shared__ uint32_t s_hist[ghost_mesh::kEdgeBins];
+    for (int i = (int)threadIdx.x; i < ghost_mesh::kEdgeBins; i += (int)blockDim.x)
+        s_hist[i] = 0;
+    __syncthreads();
+
+    const int m     = ghost_mesh::lattice_size(n_cells);
+    const int cells = (m - 1) * (m - 1);
+    const int c     = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    const int b     = (int)blockIdx.y;
+    if (c < cells)
+    {
+        const ghost_mesh::Vertex* verts = d_verts + (size_t)b * m * m;
+        int tri[2][3];
+        ghost_mesh::cell_triangles(c % (m - 1), c / (m - 1), m, tri);
+        for (int t = 0; t < 2; ++t)
+        {
+            const ghost_mesh::Vertex a = verts[tri[t][0]];
+            const ghost_mesh::Vertex q = verts[tri[t][1]];
+            const ghost_mesh::Vertex d = verts[tri[t][2]];
+            if (a.w < 0.0f || q.w < 0.0f || d.w < 0.0f) continue;
+            atomicAdd(&s_hist[ghost_mesh::edge_bin(
+                ghost_mesh::longest_edge(a.x, a.y, q.x, q.y, d.x, d.y))], 1u);
+        }
+    }
+    __syncthreads();
+    for (int i = (int)threadIdx.x; i < ghost_mesh::kEdgeBins; i += (int)blockDim.x)
+        if (s_hist[i]) atomicAdd(&d_hist[b * ghost_mesh::kEdgeBins + i], s_hist[i]);
+}
+
+__global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
+                                 const GPUPair* d_pairs, const GPUMesh* d_meshes,
+                                 int mesh0, MeshFrame f,
+                                 const ghost_mesh::Vertex* d_verts, const uint32_t* d_hist,
+                                 float* d_out_r, float* d_out_g, float* d_out_b)
+{
+    __shared__ Surface s_surfs[MAX_SURFACES];
+    __shared__ float   s_max_edge;
+    const int n = (n_surfs <= MAX_SURFACES) ? n_surfs : MAX_SURFACES;
+    d_load_surfaces(s_surfs, d_surfs, n);
+    const int b = (int)blockIdx.y;
+    if (threadIdx.x == 0)
+        s_max_edge = ghost_mesh::max_edge_from_hist(d_hist + b * ghost_mesh::kEdgeBins);
+    __syncthreads();
+
+    const float max_edge = s_max_edge;
+    const int m     = ghost_mesh::lattice_size(f.n_cells);
+    const int cells = (m - 1) * (m - 1);
+    const int c     = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (c >= cells || max_edge <= 0.0f) return;
+
+    const GPUMesh mesh = d_meshes[mesh0 + b];
+    const GPUPair pair = d_pairs[mesh.pair];
+    const ghost_mesh::Vertex* verts = d_verts + (size_t)b * m * m;
+    const float inv_area = 1.0f / ghost_mesh::iris_area(f.iris);
+    const int   w = f.width, h = f.height;
+
+    auto add = [&](int idx, float e) {
+        if (mesh.cr > 0.0f) atomicAdd(&d_out_r[idx], e * mesh.cr);
+        if (mesh.cg > 0.0f) atomicAdd(&d_out_g[idx], e * mesh.cg);
+        if (mesh.cb > 0.0f) atomicAdd(&d_out_b[idx], e * mesh.cb);
+    };
+    auto trace = [&](float u, float v, ghost_mesh::Vertex& out) {
+        return d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, out);
+    };
+
+    int tri[2][3];
+    ghost_mesh::cell_triangles(c % (m - 1), c / (m - 1), m, tri);
+    for (int t = 0; t < 2; ++t)
+    {
+        float uv[3][2];
+        bool  in_lattice[3];
+        ghost_mesh::Vertex vx[3];
+        bool  any = false;
+        for (int q = 0; q < 3; ++q)
+        {
+            const int k = tri[t][q];
+            in_lattice[q] = ghost_mesh::vertex_uv(k % m, k / m, f.n_cells, f.off_u, f.off_v,
+                                                  f.iris, uv[q][0], uv[q][1]);
+            vx[q] = verts[k];
+            any = any || vx[q].w >= 0.0f;
+        }
+        if (!any) continue;
+        ghost_mesh::draw_triangle(uv, in_lattice, vx, 1.0f, inv_area, max_edge,
+                                  w, h, trace, add);
+    }
+}
+
+// Smooth render of every (pair, source, wavelength) into d_out_r/g/b.
+// Returns false (with the error reported) on a CUDA failure.
+static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& frame,
+                          const Surface* d_surfs, int n_surfs, const GPUPair* d_pairs,
+                          GpuBufferCache& cache,
+                          const std::function<void(cudaError_t, const char*)>& report)
+{
+    if (meshes.empty()) return true;
+    const int    m          = ghost_mesh::lattice_size(frame.n_cells);
+    const size_t vert_bytes = (size_t)m * m * sizeof(ghost_mesh::Vertex);
+    const size_t hist_bytes = ghost_mesh::kEdgeBins * sizeof(uint32_t);
+
+    // Batch as many meshes as fit in about 256 MB of vertices.
+    const size_t budget = (size_t)256 << 20;
+    const int batch = (int)std::max<size_t>(1, std::min<size_t>(meshes.size(),
+                                                                 budget / vert_bytes));
+
+    auto grow = [&](void*& ptr, size_t& cap, size_t need, const char* tag) -> bool {
+        if (need <= cap) return true;
+        cudaFree(ptr);  ptr = nullptr;  cap = 0;
+        cudaError_t e = cudaMalloc(&ptr, need);
+        if (e != cudaSuccess) { report(e, tag); return false; }
+        cap = need;
+        return true;
+    };
+    if (!grow(cache.d_meshes, cache.meshes_bytes, meshes.size() * sizeof(GPUMesh), "d_meshes") ||
+        !grow(cache.d_mesh_verts, cache.mesh_verts_bytes, vert_bytes * batch, "d_mesh_verts") ||
+        !grow(cache.d_mesh_hist, cache.mesh_hist_bytes, hist_bytes * batch, "d_mesh_hist"))
+        return false;
+
+    cudaError_t e = cudaMemcpy(cache.d_meshes, meshes.data(), meshes.size() * sizeof(GPUMesh),
+                               cudaMemcpyHostToDevice);
+    if (e != cudaSuccess) { report(e, "upload meshes"); return false; }
+
+    const GPUMesh* d_meshes = static_cast<const GPUMesh*>(cache.d_meshes);
+    auto* d_verts = static_cast<ghost_mesh::Vertex*>(cache.d_mesh_verts);
+    auto* d_hist  = static_cast<uint32_t*>(cache.d_mesh_hist);
+    const int cells = (m - 1) * (m - 1);
+
+    for (int mesh0 = 0; mesh0 < (int)meshes.size(); mesh0 += batch)
+    {
+        const int nb = std::min(batch, (int)meshes.size() - mesh0);
+        e = cudaMemset(d_hist, 0, hist_bytes * nb);
+        if (e != cudaSuccess) { report(e, "clear mesh histogram"); return false; }
+
+        const dim3 vgrid((unsigned)((m * m + MESH_BLOCK - 1) / MESH_BLOCK), (unsigned)nb, 1);
+        const dim3 cgrid((unsigned)((cells + MESH_BLOCK - 1) / MESH_BLOCK), (unsigned)nb, 1);
+        mesh_trace_kernel<<<vgrid, MESH_BLOCK>>>(d_surfs, n_surfs, d_pairs, d_meshes,
+                                                 mesh0, frame, d_verts);
+        mesh_hist_kernel<<<cgrid, MESH_BLOCK>>>(d_verts, frame.n_cells, d_hist);
+        mesh_fill_kernel<<<cgrid, MESH_BLOCK>>>(d_surfs, n_surfs, d_pairs, d_meshes,
+                                                mesh0, frame, d_verts, d_hist,
+                                                cache.d_out_r, cache.d_out_g, cache.d_out_b);
+        e = cudaGetLastError();
+        if (e != cudaSuccess) { report(e, "smooth ghost kernels"); return false; }
+    }
+    return true;
+}
+
+// ===========================================================================
 // CPU launcher
 // ===========================================================================
 
@@ -1301,10 +1556,19 @@ void launch_ghost_cuda(
         seed_matches &&
         (cache.cached_grid_count      > 0);
 
+    // Smooth mode traces its own lattice (render_smooth) and needs no
+    // point grid.
+    const bool smooth = config.ghost_render == 1;
+    const int  smooth_cells = std::min(std::max(config.ray_grid, 1), ghost_mesh::kMaxGrid);
+
     int n_grid = 0;
     std::vector<GPUSample> grid_samples;
 
-    if (grid_cached)
+    if (smooth)
+    {
+        n_grid = 1;   // unused
+    }
+    else if (grid_cached)
     {
         // Reuse previous frame's grid — already on device in cache.d_grid.
         n_grid = cache.cached_grid_count;
@@ -1539,7 +1803,7 @@ void launch_ghost_cuda(
     if (!ensure(cache.d_surfs, cache.surfs_bytes, n_surfs * sizeof(Surface),    "d_surfs")) return;
     if (!ensure(cache.d_pairs, cache.pairs_bytes, n_pairs * sizeof(GPUPair),     "d_pairs")) return;
     if (!ensure(cache.d_src,   cache.src_bytes,   n_src   * sizeof(GPUSource),   "d_src"  )) return;
-    if (!grid_cached) {
+    if (!grid_cached && !smooth) {
         if (!ensure(cache.d_grid, cache.grid_bytes, n_grid * sizeof(GPUSample), "d_grid")) return;
     }
     if (!ensure(cache.d_spec,  cache.spec_bytes,  n_spec  * sizeof(GPUSpectralSampleDev), "d_spec")) return;
@@ -1579,7 +1843,7 @@ void launch_ghost_cuda(
                        n_pairs * sizeof(GPUPair), cudaMemcpyHostToDevice));
     GPU_CHK(cudaMemcpy(cache.d_src,   gpu_src.data(),
                        n_src   * sizeof(GPUSource), cudaMemcpyHostToDevice));
-    if (!grid_cached) {
+    if (!grid_cached && !smooth) {
         GPU_CHK(cudaMemcpy(cache.d_grid, grid_samples.data(),
                            n_grid * sizeof(GPUSample), cudaMemcpyHostToDevice));
         // Update cache key
@@ -1599,23 +1863,84 @@ void launch_ghost_cuda(
     GPU_CHK(cudaMemset(cache.d_out_b, 0, n_px * sizeof(float)));
 
     // ---- Launch ----
-    ghost_kernel<<<grid_dim, block>>>(
-        static_cast<Surface*>(cache.d_surfs), n_surfs, lens.sensor_z,
-        static_cast<GPUPair*>(cache.d_pairs), n_src,
-        static_cast<GPUSource*>(cache.d_src),
-        static_cast<GPUSample*>(cache.d_grid), n_grid,
-        front_R, start_z,
-        sensor_half_w, sensor_half_h,
-        width, height,
-        cache.d_out_r, cache.d_out_g, cache.d_out_b,
-        config.gain, ray_weight,
-        static_cast<GPUSpectralSampleDev*>(cache.d_spec), n_spec,
-        (float)fmt_w, (float)fmt_h,
-        (float)fmt_x0_in_buf, (float)fmt_y0_in_buf,
-        config.spectral_jitter ? 1 : 0,
-        spec_bin_width * std::max(0.0f, config.spectral_jitter_scale),
-        cie_sum_r, cie_sum_g, cie_sum_b,
-        (uint32_t)config.spectral_jitter_seed);
+    if (smooth)
+    {
+        // One mesh per (pair, source, wavelength).  Smooth mode ignores
+        // Pupil Jitter and Spectral Jitter: both would move the whole mesh
+        // from frame to frame and make ghosts flicker.  More Spectral
+        // Samples give smoother colour fringes instead.
+        const ghost_mesh::Iris iris = ghost_mesh::make_iris(config.aperture_blades,
+                                                            config.aperture_rotation_deg);
+        const float cell_share = (2.0f / smooth_cells) * (2.0f / smooth_cells) /
+                                 ghost_mesh::iris_area(iris);
+        std::vector<GPUMesh> meshes;
+        meshes.reserve((size_t)n_pairs * n_src * n_spec);
+        for (int pi = 0; pi < n_pairs; ++pi)
+        {
+            const GPUPair& gp = gpu_pairs[pi];
+            for (int si = 0; si < n_src; ++si)
+            {
+                const GPUSource& src = gpu_src[si];
+                const float bx = std::tan(src.angle_x), by = std::tan(src.angle_y);
+                const float inv = 1.0f / std::sqrt(bx * bx + by * by + 1.0f);
+                for (int k = 0; k < n_spec; ++k)
+                {
+                    const GPUSpectralSampleDev& sp = spectral_cpu[k];
+                    const float base = config.gain * gp.area_boost;
+                    GPUMesh mh;
+                    mh.pair = pi;
+                    mh.lambda = sp.lambda;
+                    mh.dir_x = bx * inv;  mh.dir_y = by * inv;  mh.dir_z = inv;
+                    mh.cr = base * src.r * sp.rw * gp.color_r;
+                    mh.cg = base * src.g * sp.gw * gp.color_g;
+                    mh.cb = base * src.b * sp.bw * gp.color_b;
+                    const float peak = std::max(mh.cr, std::max(mh.cg, mh.cb));
+                    if (!(peak > 1e-14f)) continue;
+                    // Same early-out as ghost_kernel: stop tracing a ray once
+                    // its light is guaranteed below 1e-5 per pixel.
+                    mh.min_weight = std::min(1e-5f / std::max(cell_share * peak, 1e-20f), 0.01f);
+                    meshes.push_back(mh);
+                }
+            }
+        }
+
+        MeshFrame frame;
+        frame.front_R       = front_R;
+        frame.start_z       = start_z;
+        frame.sensor_z      = lens.sensor_z;
+        frame.sensor_half_w = sensor_half_w;
+        frame.sensor_half_h = sensor_half_h;
+        frame.fmt_w  = (float)fmt_w;           frame.fmt_h  = (float)fmt_h;
+        frame.fmt_x0 = (float)fmt_x0_in_buf;   frame.fmt_y0 = (float)fmt_y0_in_buf;
+        frame.width  = width;                  frame.height = height;
+        frame.n_cells = smooth_cells;
+        frame.off_u = frame.off_v = 0.5f;
+        frame.iris = iris;
+
+        if (!render_smooth(meshes, frame, static_cast<const Surface*>(cache.d_surfs), n_surfs,
+                           static_cast<const GPUPair*>(cache.d_pairs), cache, report))
+            return;
+    }
+    else
+    {
+        ghost_kernel<<<grid_dim, block>>>(
+            static_cast<Surface*>(cache.d_surfs), n_surfs, lens.sensor_z,
+            static_cast<GPUPair*>(cache.d_pairs), n_src,
+            static_cast<GPUSource*>(cache.d_src),
+            static_cast<GPUSample*>(cache.d_grid), n_grid,
+            front_R, start_z,
+            sensor_half_w, sensor_half_h,
+            width, height,
+            cache.d_out_r, cache.d_out_g, cache.d_out_b,
+            config.gain, ray_weight,
+            static_cast<GPUSpectralSampleDev*>(cache.d_spec), n_spec,
+            (float)fmt_w, (float)fmt_h,
+            (float)fmt_x0_in_buf, (float)fmt_y0_in_buf,
+            config.spectral_jitter ? 1 : 0,
+            spec_bin_width * std::max(0.0f, config.spectral_jitter_scale),
+            cie_sum_r, cie_sum_g, cie_sum_b,
+            (uint32_t)config.spectral_jitter_seed);
+    }
 
     GPU_CHK(cudaDeviceSynchronize());
 

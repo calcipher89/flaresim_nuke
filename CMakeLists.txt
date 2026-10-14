@@ -122,6 +122,15 @@ if(FLARESIM_BUILD_TESTS)
     target_include_directories(flaresim_extras_test PRIVATE src)
     add_test(NAME haze_starburst COMMAND flaresim_extras_test)
 
+    # Smooth ghost render (ghost_mesh.h) against point splatting, on the CPU.
+    add_executable(flaresim_ghost_mesh_test src/ghost_mesh_test.cpp src/ghost.cpp
+                   src/lens.cpp src/trace.cpp)
+    target_include_directories(flaresim_ghost_mesh_test PRIVATE src)
+    target_compile_definitions(flaresim_ghost_mesh_test PRIVATE
+        FLARESIM_TEST_LENS="${CMAKE_CURRENT_SOURCE_DIR}/lenses/lens_files/AI_Nikkor_50mm_F1.2S.lens")
+    target_link_libraries(flaresim_ghost_mesh_test PRIVATE Threads::Threads)
+    add_test(NAME ghost_mesh COMMAND flaresim_ghost_mesh_test)
+
     add_executable(flaresim_preview_test src/preview_test.cpp)
     target_include_directories(flaresim_preview_test PRIVATE src)
     target_link_libraries(flaresim_preview_test PRIVATE flaresim_preview)
