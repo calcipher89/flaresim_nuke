@@ -76,6 +76,8 @@ void GpuBufferCache::release()
     cudaFree(d_meshes);      d_meshes     = nullptr;  meshes_bytes     = 0;
     cudaFree(d_mesh_verts);  d_mesh_verts = nullptr;  mesh_verts_bytes = 0;
     cudaFree(d_mesh_hist);   d_mesh_hist  = nullptr;  mesh_hist_bytes  = 0;
+    cudaFree(d_mesh_cuts);   d_mesh_cuts  = nullptr;  mesh_cuts_bytes  = 0;
+    cudaFree(d_cut_queue);   d_cut_queue  = nullptr;  cut_queue_bytes  = 0;
 
     // Blur resources
     cudaFree(blur_a);  blur_a = nullptr;
@@ -1164,6 +1166,8 @@ struct MeshFrame
 };
 
 static constexpr int MESH_BLOCK = 256;
+// Blocks for mesh_cut_kernel, which loops over however many edges are queued.
+static constexpr int kCutBlocks = 512;
 
 __device__ __forceinline__
 void d_load_surfaces(Surface* s_surfs, const Surface* d_surfs, int n)
@@ -1263,16 +1267,94 @@ __global__ void mesh_hist_kernel(const ghost_mesh::Vertex* d_verts, int n_cells,
         if (s_hist[i]) atomicAdd(&d_hist[b * ghost_mesh::kEdgeBins + i], s_hist[i]);
 }
 
-__global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
-                                 const GPUPair* d_pairs, const GPUMesh* d_meshes,
-                                 int mesh0, MeshFrame f,
-                                 const ghost_mesh::Vertex* d_verts, const uint32_t* d_hist,
-                                 float* d_out_r, float* d_out_g, float* d_out_b)
+// Where the light stops along a clipped lattice edge (ghost_mesh::edge_cut):
+// pupil position and traced vertex.  One slot per lattice edge
+// (ghost_mesh::edge_slot), filled only for edges with one end traced and
+// the other lost.
+struct EdgeCut
+{
+    float uv[2];
+    ghost_mesh::Vertex vx;
+};
+
+// Queues the clipped edges of each mesh (one end traced, the other lost,
+// both inside the iris) for mesh_cut_kernel.  Done as a separate pass so the
+// bisection rays run on full warps: traced inside the fill kernel, only the
+// few rim lanes of a warp were busy and they took about 90% of its time.
+__global__ void mesh_cut_find_kernel(const ghost_mesh::Vertex* d_verts, MeshFrame f,
+                                     uint32_t* d_queue, uint32_t* d_count)
+{
+    const int m = ghost_mesh::lattice_size(f.n_cells);
+    const int k = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (k >= m * m) return;
+    const int b = (int)blockIdx.y;
+    const ghost_mesh::Vertex* verts = d_verts + (size_t)b * m * m;
+    const int i = k % m, j = k / m;
+    float u, v;
+    if (!ghost_mesh::vertex_uv(i, j, f.n_cells, f.off_u, f.off_v, f.iris, u, v)) return;
+    const bool traced = verts[k].w >= 0.0f;
+    const int  next[3] = { i + 1 < m ? k + 1 : -1,
+                           j + 1 < m ? k + m : -1,
+                           (i + 1 < m && j + 1 < m) ? k + m + 1 : -1 };
+    for (int d = 0; d < 3; ++d)
+    {
+        const int kn = next[d];
+        if (kn < 0 || (verts[kn].w >= 0.0f) == traced) continue;
+        if (!ghost_mesh::vertex_uv(kn % m, kn / m, f.n_cells, f.off_u, f.off_v, f.iris, u, v))
+            continue;
+        d_queue[atomicAdd(d_count, 1u)] = (uint32_t)b * (uint32_t)(m * m * 3) + (uint32_t)(k * 3 + d);
+    }
+}
+
+// Bisects each queued edge, one edge per thread.
+__global__ void mesh_cut_kernel(const Surface* d_surfs, int n_surfs,
+                                const GPUPair* d_pairs, const GPUMesh* d_meshes,
+                                int mesh0, MeshFrame f, const ghost_mesh::Vertex* d_verts,
+                                const uint32_t* d_queue, const uint32_t* d_count,
+                                EdgeCut* d_cuts)
 {
     __shared__ Surface s_surfs[MAX_SURFACES];
-    __shared__ float   s_max_edge;
     const int n = (n_surfs <= MAX_SURFACES) ? n_surfs : MAX_SURFACES;
     d_load_surfaces(s_surfs, d_surfs, n);
+    __syncthreads();
+
+    const uint32_t n_queued = *d_count;
+    const int m = ghost_mesh::lattice_size(f.n_cells);
+    const uint32_t per_mesh = (uint32_t)(m * m * 3);
+    for (uint32_t q = blockIdx.x * blockDim.x + threadIdx.x; q < n_queued;
+         q += gridDim.x * blockDim.x)
+    {
+        const uint32_t id = d_queue[q];
+        const int b = (int)(id / per_mesh);
+        const int r = (int)(id % per_mesh);
+        const int k = r / 3, d = r % 3;
+        const int kn = k + (d == 0 ? 1 : (d == 1 ? m : m + 1));
+        const ghost_mesh::Vertex* verts = d_verts + (size_t)b * m * m;
+        const ghost_mesh::Vertex vk = verts[k], vn = verts[kn];
+        const bool k_in = vk.w >= 0.0f;
+        const int ki = k_in ? k : kn, ko = k_in ? kn : k;
+        float uv_in[2], uv_out[2];
+        ghost_mesh::vertex_uv(ki % m, ki / m, f.n_cells, f.off_u, f.off_v, f.iris,
+                              uv_in[0], uv_in[1]);
+        ghost_mesh::vertex_uv(ko % m, ko / m, f.n_cells, f.off_u, f.off_v, f.iris,
+                              uv_out[0], uv_out[1]);
+        const GPUMesh mesh = d_meshes[mesh0 + b];
+        const GPUPair pair = d_pairs[mesh.pair];
+        auto trace = [&](float u, float v, ghost_mesh::Vertex& out) {
+            return d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, out);
+        };
+        EdgeCut c;
+        ghost_mesh::edge_cut(uv_in, uv_out, trace, c.uv, c.vx, k_in ? vk : vn);
+        d_cuts[id] = c;
+    }
+}
+
+__global__ void mesh_fill_kernel(const GPUMesh* d_meshes, int mesh0, MeshFrame f,
+                                 const ghost_mesh::Vertex* d_verts, const uint32_t* d_hist,
+                                 const EdgeCut* d_cuts,
+                                 float* d_out_r, float* d_out_g, float* d_out_b)
+{
+    __shared__ float   s_max_edge;
     const int b = (int)blockIdx.y;
     if (threadIdx.x == 0)
         s_max_edge = ghost_mesh::max_edge_from_hist(d_hist + b * ghost_mesh::kEdgeBins);
@@ -1286,8 +1368,8 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
     const int c     = (int)(blockIdx.x * blockDim.x + threadIdx.x);
 
     const GPUMesh mesh = d_meshes[mesh0 + b];
-    const GPUPair pair = d_pairs[mesh.pair];
     const ghost_mesh::Vertex* verts = d_verts + (size_t)b * m * m;
+    const EdgeCut* cuts = d_cuts + (size_t)b * m * m * 3;
     const float inv_area = 1.0f / ghost_mesh::iris_area(f.iris);
     const int   w = f.width, h = f.height;
 
@@ -1295,9 +1377,6 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
         if (mesh.cr > 0.0f) atomicAdd(&d_out_r[idx], e * mesh.cr);
         if (mesh.cg > 0.0f) atomicAdd(&d_out_g[idx], e * mesh.cg);
         if (mesh.cb > 0.0f) atomicAdd(&d_out_b[idx], e * mesh.cb);
-    };
-    auto trace = [&](float u, float v, ghost_mesh::Vertex& out) {
-        return d_mesh_ray(s_surfs, n, pair, mesh, f, u, v, out);
     };
 
     // Each thread works out its cell's triangles.  Tiny ones are drawn as
@@ -1335,8 +1414,15 @@ __global__ void mesh_fill_kernel(const Surface* d_surfs, int n_surfs,
                 any = any || vx[q].w >= 0.0f;
             }
             if (!any) continue;
-            ghost_mesh::draw_triangle(uv, in_lattice, vx, 1.0f, inv_area, max_edge,
-                                      w, h, trace, add, keep);
+            const int* kq = tri[t];
+            auto cut = [&](int qa, int qc, float* uv_cut, ghost_mesh::Vertex& v_cut) {
+                const EdgeCut ec = cuts[ghost_mesh::edge_slot(kq[qa], kq[qc], m)];
+                uv_cut[0] = ec.uv[0];
+                uv_cut[1] = ec.uv[1];
+                v_cut = ec.vx;
+            };
+            ghost_mesh::draw_triangle_cut(uv, in_lattice, vx, 1.0f, inv_area, max_edge,
+                                          w, h, cut, add, keep);
         }
     }
 
@@ -1417,11 +1503,14 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
     const int    m          = ghost_mesh::lattice_size(frame.n_cells);
     const size_t vert_bytes = (size_t)m * m * sizeof(ghost_mesh::Vertex);
     const size_t hist_bytes = ghost_mesh::kEdgeBins * sizeof(uint32_t);
+    // Per mesh, 3 lattice edges per vertex: a cut slot and a queue entry each.
+    const size_t cut_bytes   = (size_t)m * m * 3 * sizeof(EdgeCut);
+    const size_t queue_bytes = (size_t)m * m * 3 * sizeof(uint32_t);
 
-    // Batch as many meshes as fit in about 256 MB of vertices.
-    const size_t budget = (size_t)256 << 20;
-    const int batch = (int)std::max<size_t>(1, std::min<size_t>(meshes.size(),
-                                                                 budget / vert_bytes));
+    // Batch as many meshes as fit in about 384 MB.
+    const size_t budget = (size_t)384 << 20;
+    const int batch = (int)std::max<size_t>(1, std::min<size_t>(
+        meshes.size(), budget / (vert_bytes + cut_bytes + queue_bytes)));
 
     auto grow = [&](void*& ptr, size_t& cap, size_t need, const char* tag) -> bool {
         if (need <= cap) return true;
@@ -1433,7 +1522,11 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
     };
     if (!grow(cache.d_meshes, cache.meshes_bytes, meshes.size() * sizeof(GPUMesh), "d_meshes") ||
         !grow(cache.d_mesh_verts, cache.mesh_verts_bytes, vert_bytes * batch, "d_mesh_verts") ||
-        !grow(cache.d_mesh_hist, cache.mesh_hist_bytes, hist_bytes * batch, "d_mesh_hist"))
+        !grow(cache.d_mesh_hist, cache.mesh_hist_bytes, hist_bytes * batch, "d_mesh_hist") ||
+        !grow(cache.d_mesh_cuts, cache.mesh_cuts_bytes, cut_bytes * batch, "d_mesh_cuts") ||
+        // The queue's last entry is its length.
+        !grow(cache.d_cut_queue, cache.cut_queue_bytes, queue_bytes * batch + sizeof(uint32_t),
+              "d_cut_queue"))
         return false;
 
     cudaError_t e = cudaMemcpy(cache.d_meshes, meshes.data(), meshes.size() * sizeof(GPUMesh),
@@ -1443,12 +1536,16 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
     const GPUMesh* d_meshes = static_cast<const GPUMesh*>(cache.d_meshes);
     auto* d_verts = static_cast<ghost_mesh::Vertex*>(cache.d_mesh_verts);
     auto* d_hist  = static_cast<uint32_t*>(cache.d_mesh_hist);
+    auto* d_cuts  = static_cast<EdgeCut*>(cache.d_mesh_cuts);
+    auto* d_queue = static_cast<uint32_t*>(cache.d_cut_queue);
+    uint32_t* d_count = d_queue + (queue_bytes * batch) / sizeof(uint32_t);
     const int cells = (m - 1) * (m - 1);
 
     for (int mesh0 = 0; mesh0 < (int)meshes.size(); mesh0 += batch)
     {
         const int nb = std::min(batch, (int)meshes.size() - mesh0);
         e = cudaMemset(d_hist, 0, hist_bytes * nb);
+        if (e == cudaSuccess) e = cudaMemset(d_count, 0, sizeof(uint32_t));
         if (e != cudaSuccess) { report(e, "clear mesh histogram"); return false; }
 
         const dim3 vgrid((unsigned)((m * m + MESH_BLOCK - 1) / MESH_BLOCK), (unsigned)nb, 1);
@@ -1456,8 +1553,12 @@ static bool render_smooth(const std::vector<GPUMesh>& meshes, const MeshFrame& f
         mesh_trace_kernel<<<vgrid, MESH_BLOCK>>>(d_surfs, n_surfs, d_pairs, d_meshes,
                                                  mesh0, frame, d_verts);
         mesh_hist_kernel<<<cgrid, MESH_BLOCK>>>(d_verts, frame.n_cells, d_hist);
-        mesh_fill_kernel<<<cgrid, MESH_BLOCK>>>(d_surfs, n_surfs, d_pairs, d_meshes,
-                                                mesh0, frame, d_verts, d_hist,
+        mesh_cut_find_kernel<<<vgrid, MESH_BLOCK>>>(d_verts, frame, d_queue, d_count);
+        mesh_cut_kernel<<<kCutBlocks, MESH_BLOCK>>>(d_surfs, n_surfs, d_pairs, d_meshes,
+                                                    mesh0, frame, d_verts, d_queue, d_count,
+                                                    d_cuts);
+        mesh_fill_kernel<<<cgrid, MESH_BLOCK>>>(d_meshes, mesh0, frame, d_verts, d_hist,
+                                                d_cuts,
                                                 cache.d_out_r, cache.d_out_g, cache.d_out_b);
         e = cudaGetLastError();
         if (e != cudaSuccess) { report(e, "smooth ghost kernels"); return false; }

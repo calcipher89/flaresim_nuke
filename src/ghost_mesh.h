@@ -335,11 +335,26 @@ FS_MESH_HD void edge_cut(const float* uv_in, const float* uv_out, Trace& trace,
     }
 }
 
+// The lattice edge between vertices ka and kb (row-major, m per side), as
+// an index into a per-mesh array of 3 slots per vertex: slot 0 is the edge
+// to the right neighbour, 1 the one below, 2 the diagonal (k, k + m + 1).
+// These are the only edges cell_triangles makes.
+FS_MESH_HD int edge_slot(int ka, int kb, int m)
+{
+    const int lo = ka < kb ? ka : kb, d = (ka < kb ? kb : ka) - lo;
+    return lo * 3 + (d == 1 ? 0 : (d == m ? 1 : 2));
+}
+
+// Draw one lattice triangle, with the cut points of its clipped edges from
+// cut(qa, qc, uv_cut, v_cut): corner qa traced, corner qc lost, giving the
+// pupil position and traced vertex where the light stops along that edge
+// (edge_cut, or a lookup of cuts made beforehand).
 FS_MESH_EXEC_CHECK
-template <class Trace, class Add, class Raster>
-FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], const Vertex vx[3],
-                              float scale, float inv_iris_area, float max_edge,
-                              int w, int h, Trace& trace, Add& add, Raster& raster)
+template <class Cut, class Add, class Raster>
+FS_MESH_HD void draw_triangle_cut(const float uv[3][2], const bool in_lattice[3],
+                                  const Vertex vx[3], float scale, float inv_iris_area,
+                                  float max_edge, int w, int h, Cut& cut, Add& add,
+                                  Raster& raster)
 {
     if (!in_lattice[0] || !in_lattice[1] || !in_lattice[2]) return;
     int ok[3], lost[3], n_ok = 0, n_lost = 0;
@@ -370,8 +385,8 @@ FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], co
         const int a = ok[0], b = ok[1], c = lost[0];
         float ua[2], ub[2];
         Vertex va, vb;
-        edge_cut(uv[a], uv[c], trace, ua, va, vx[a]);
-        edge_cut(uv[b], uv[c], trace, ub, vb, vx[b]);
+        cut(a, c, ua, va);
+        cut(b, c, ub, vb);
         fill(uv[a], uv[b], ub, vx[a], vx[b], vb);
         fill(uv[a], ub, ua, vx[a], vb, va);
         return;
@@ -380,9 +395,23 @@ FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], co
     const int a = ok[0], b = lost[0], c = lost[1];
     float ub[2], uc[2];
     Vertex vb, vc;
-    edge_cut(uv[a], uv[b], trace, ub, vb, vx[a]);
-    edge_cut(uv[a], uv[c], trace, uc, vc, vx[a]);
+    cut(a, b, ub, vb);
+    cut(a, c, uc, vc);
     fill(uv[a], ub, uc, vx[a], vb, vc);
+}
+
+// draw_triangle_cut bisecting clipped edges on the spot with trace.
+FS_MESH_EXEC_CHECK
+template <class Trace, class Add, class Raster>
+FS_MESH_HD void draw_triangle(const float uv[3][2], const bool in_lattice[3], const Vertex vx[3],
+                              float scale, float inv_iris_area, float max_edge,
+                              int w, int h, Trace& trace, Add& add, Raster& raster)
+{
+    auto cut = [&](int qa, int qc, float* uv_cut, Vertex& v_cut) {
+        edge_cut(uv[qa], uv[qc], trace, uv_cut, v_cut, vx[qa]);
+    };
+    draw_triangle_cut(uv, in_lattice, vx, scale, inv_iris_area, max_edge, w, h, cut, add,
+                      raster);
 }
 
 // draw_triangle filling on the spot with raster_triangle (the CPU path).
