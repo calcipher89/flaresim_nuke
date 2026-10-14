@@ -50,6 +50,25 @@ inline int effective_ray_grid(int quality, int ray_grid, int fmt_w)
     return quality_ray_grid(quality, fmt_w);
 }
 
+// ---- Ghost Render ----
+// Points: every ray is a dot (the original renderer).  Smooth: each ghost is
+// drawn as a filled mesh of rays (ghost_mesh.h).  The knob defaults to
+// Points so scripts saved before Smooth existed render as before; nodes made
+// from the menu start on Smooth (menu.py).
+enum GhostRender { kRenderPoints = 0, kRenderSmooth };
+
+static const char* const kGhostRenderNames[] = { "Points", "Smooth", nullptr };
+
+static const char* const kGhostRenderTooltip =
+    "How each ghost is drawn.\n"
+    "Smooth: rays on neighbouring grid points are joined into a mesh and "
+    "filled, so large soft ghosts come out clean even at Medium quality.  "
+    "Quality then sets how finely edges and fine detail follow the optics.  "
+    "Pupil Jitter and Spectral Jitter are not used; raise Spectral Samples "
+    "for smoother colour fringes.\n"
+    "Points: every ray is a dot.  Large ghosts look grainy unless the ray "
+    "grid is very high.  Scripts saved before Smooth existed use Points.";
+
 // ---- Clip To ----
 enum ClipTo { kClipBBox = 0, kClipFormat, kClipOverscan };
 

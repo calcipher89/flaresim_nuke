@@ -60,6 +60,11 @@ struct GpuBufferCache
     void*       h_pinned       = nullptr;
     std::size_t h_pinned_elems = 0;   // capacity per channel in elements
 
+    // --- Smooth ghost render (render_smooth in ghost_cuda.cu) ---
+    void*       d_meshes         = nullptr;  std::size_t meshes_bytes     = 0;
+    void*       d_mesh_verts     = nullptr;  std::size_t mesh_verts_bytes = 0;
+    void*       d_mesh_hist      = nullptr;  std::size_t mesh_hist_bytes  = 0;
+
     // --- Cached pupil grid (rebuilt only when config changes) ---
     void*       d_cached_grid = nullptr;
     std::size_t cached_grid_bytes = 0;

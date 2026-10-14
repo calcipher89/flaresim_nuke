@@ -161,6 +161,7 @@ public:
     float       flare_gain_;
     int         ray_grid_;                 // used when Quality is Custom
     int         quality_;                  // flaresim::Quality
+    int         ghost_render_;             // flaresim::GhostRender
     int         clip_to_;                  // flaresim::ClipTo
     int         overscan_w_, overscan_h_;  // Format + Overscan padding, px
     bool        show_advanced_;
@@ -295,6 +296,7 @@ public:
         , flare_gain_(10.0f)
         , ray_grid_(flaresim::kDefaultRayGrid)
         , quality_(flaresim::kQualityMedium)
+        , ghost_render_(flaresim::kRenderPoints)
         , clip_to_(flaresim::kClipBBox)
         , overscan_w_(0)
         , overscan_h_(0)
@@ -531,6 +533,9 @@ public:
                    "so a look renders the same at any resolution.  Each step up "
                    "takes about four times as long.\n"
                    "Custom: set Ray Grid yourself.");
+        Enumeration_knob(f, &ghost_render_, flaresim::kGhostRenderNames,
+                         "ghost_render", "Ghost Render");
+        Tooltip(f, flaresim::kGhostRenderTooltip);
         Int_knob(f, &ray_grid_, "ray_grid", "Ray Grid (NxN)");
         Tooltip(f, "Custom Quality: NxN entrance-pupil samples per source.  "
                    "Higher = smoother ghosts, longer render time.");
@@ -1306,6 +1311,7 @@ public:
 
         GhostConfig cfg;
         cfg.ray_grid              = flaresim::effective_ray_grid(quality_, ray_grid_, pending_fmt_w_);
+        cfg.ghost_render          = ghost_render_;
         cfg.gain                  = flare_gain_ * 1000.0f;
         cfg.aperture_blades       = aperture_blades_;
         cfg.aperture_rotation_deg = aperture_rotation_;

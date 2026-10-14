@@ -30,9 +30,10 @@ Looks saved before the rename apply as before.
 
 ### Simpler Node Panel
 
-The node opens with just the main controls: Lens Browser, Source, Matte, **Quality**, **Flare Gain**, **Ghost Blur** and **Output**. Tick **Show Advanced** to see everything else (Source Extraction, Pupil Jitter, Camera, Distance, Aperture, Spectral, Highlight, Blur Passes, Sample Radius, Edge Blend, Source Cap). Hidden settings still apply, and looks and the Lens Browser still set them.
+The node opens with just the main controls: Lens Browser, Source, Matte, **Quality**, **Ghost Render**, **Flare Gain**, **Ghost Blur** and **Output**. Tick **Show Advanced** to see everything else (Source Extraction, Pupil Jitter, Camera, Distance, Aperture, Spectral, Highlight, Blur Passes, Sample Radius, Edge Blend, Source Cap). Hidden settings still apply, and looks and the Lens Browser still set them.
 
 - **Quality** — **Low**, **Medium** (default), **High**, **Ultra** or **Custom**. The presets follow the image width, about 128, 256, 512 and 1024 rays across on a 1920 plate, so a look renders the same at any resolution. Each step up takes about four times as long. **Custom** shows **Ray Grid** to set it yourself. Scripts saved with their own Ray Grid open as Custom and keep it; scripts on the old default (64) now render at Medium. Looks no longer set the ray grid.
+- **Ghost Render** — **Smooth** (new nodes) or **Points**. Smooth joins each ghost's rays into a mesh and fills it, so large soft ghosts come out clean instead of grainy, even at Medium; Quality then sets how finely edges and fine detail follow the optics. Points draws every ray as a dot, as before, and needs a very high ray grid to look smooth on big ghosts. Smooth ignores Pupil Jitter and Spectral Jitter (they would make ghosts flicker from frame to frame); raise **Spectral Samples** for smoother colour fringes. Scripts saved before Ghost Render existed open on Points and render as they did. The Lens Browser preview has always drawn ghosts the Smooth way.
 
 ### Camera Input (FlareSim)
 

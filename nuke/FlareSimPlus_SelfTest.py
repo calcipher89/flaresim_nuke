@@ -312,8 +312,9 @@ def _sample_energy(node, w, h):
     return total, lit
 
 
-def _render_lens(lens, out_dir):
-    """Render one lens through the node.  Returns (status, text, detail)."""
+def _render_lens(lens, out_dir, render='Smooth'):
+    """Render one lens through the node with Ghost Render set to render
+    (Smooth or Points).  Returns (status, text, detail)."""
     w, h = TEST_FORMAT
     fmt = '%d %d 1 flaresim_selftest' % (w, h)
     nuke.addFormat(fmt)
@@ -328,6 +329,7 @@ def _render_lens(lens, out_dir):
         fs['manual_xy'].setValue([w * 0.35, h * 0.6])
         fs['source_intensity'].setValue(30)
         fs['quality'].setValue('Low')
+        fs['ghost_render'].setValue(render)
         fs['lens_file'].setValue(lens)
         out = os.path.join(out_dir, 'flaresim_selftest.exr').replace('\\', '/')
         wr = nuke.nodes.Write(inputs=[fs], file=out, file_type='exr')
@@ -336,15 +338,15 @@ def _render_lens(lens, out_dir):
         try:
             nuke.execute(wr, 1, 1)
         except Exception as e:
-            return FAIL, 'Render failed: %s' % os.path.basename(lens), str(e)
+            return FAIL, 'Render failed (%s): %s' % (render, os.path.basename(lens)), str(e)
         secs = time.time() - start
         energy, lit = _sample_energy(fs, w, h)
         if energy != energy:
-            return FAIL, 'NaN pixels: %s' % os.path.basename(lens), None
+            return FAIL, 'NaN pixels (%s): %s' % (render, os.path.basename(lens)), None
         if lit == 0:
-            return FAIL, 'Black frame (no flare): %s' % os.path.basename(lens), None
-        return PASS, 'Rendered %s in %.2fs (%d of 144 samples lit)' % (
-            os.path.basename(lens), secs, lit), None
+            return FAIL, 'Black frame (%s, no flare): %s' % (render, os.path.basename(lens)), None
+        return PASS, 'Rendered %s (%s) in %.2fs (%d of 144 samples lit)' % (
+            os.path.basename(lens), render, secs, lit), None
     finally:
         for n in reversed(made):
             try:
@@ -367,13 +369,20 @@ def check_render(report, all_lenses=False):
                    % (len(picked), len(lenses)))
     out_dir = tempfile.mkdtemp(prefix='flaresim_selftest')
     failed = 0
+    renders = 0
     for lens in picked:
-        status, text, detail = _render_lens(lens, out_dir)
-        failed += status == FAIL
-        report.add(status, text, detail)
-        # A GPU or driver problem fails every lens the same way.
-        if failed >= 3 and failed == picked.index(lens) + 1:
-            report.add(FAIL, 'Stopped: the first 3 renders all failed')
+        stop = False
+        for render in ('Smooth', 'Points'):
+            status, text, detail = _render_lens(lens, out_dir, render)
+            renders += 1
+            failed += status == FAIL
+            report.add(status, text, detail)
+            # A GPU or driver problem fails every lens the same way.
+            if failed >= 3 and failed == renders:
+                report.add(FAIL, 'Stopped: the first 3 renders all failed')
+                stop = True
+                break
+        if stop:
             break
     try:
         for f in os.listdir(out_dir):

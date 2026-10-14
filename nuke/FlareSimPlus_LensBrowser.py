@@ -2703,7 +2703,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
                     self, 'FlareSim', 'Select the FlareSim node(s) to update, then try again.')
             return []
         if create:
-            node = nuke.createNode('FlareSimPlus', inpanel=False)
+            node = nuke.createNode('FlareSimPlus', 'ghost_render Smooth', inpanel=False)
             self._node = node
             self._created_node = node
             return [node]
