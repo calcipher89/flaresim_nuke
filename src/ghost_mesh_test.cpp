@@ -5,7 +5,10 @@
 // Points mode) and with the Smooth mesh fill, using the same helpers as the
 // CUDA Smooth kernels, then checks that:
 //   - both modes put the same total light in the frame (within a few %),
-//   - Smooth is much less grainy inside large ghosts.
+//   - Smooth is much less grainy inside large ghosts,
+//   - cutting clipped edges beforehand, as the CUDA kernels do
+//     (mesh_cut_find_kernel, mesh_cut_kernel), draws exactly the same image
+//     as bisecting them while drawing.
 //
 //   flaresim_ghost_mesh_test [lens] [out_prefix w h points_grid smooth_grid]
 //
@@ -118,8 +121,10 @@ Image render_points(const Scene& sc, int n)
     return out;
 }
 
-// Smooth mode: the lattice and fill used by the CUDA Smooth kernels.
-Image render_smooth(const Scene& sc, int n)
+// Smooth mode: the lattice and fill used by the CUDA Smooth kernels.  With
+// precut, clipped lattice edges are bisected first into a table indexed by
+// edge_slot, as the CUDA kernels do, instead of while drawing.
+Image render_smooth(const Scene& sc, int n, bool precut = false)
 {
     using namespace ghost_mesh;
     const int m = lattice_size(n);
@@ -168,6 +173,30 @@ Image render_smooth(const Scene& sc, int n)
                 out.w = tr.weight;
                 return true;
             };
+            struct Cut { float uv[2]; Vertex vx; };
+            std::vector<Cut> cuts;
+            if (precut)
+            {
+                cuts.assign((size_t)m * m * 3, Cut{});
+                for (int k = 0; k < m * m; ++k)
+                {
+                    const int i = k % m, j = k / m;
+                    const int next[3] = { i + 1 < m ? k + 1 : -1, j + 1 < m ? k + m : -1,
+                                          (i + 1 < m && j + 1 < m) ? k + m + 1 : -1 };
+                    float ua[2], ub[2];
+                    if (!vertex_uv(i, j, n, 0.5f, 0.5f, ir, ua[0], ua[1])) continue;
+                    for (int d = 0; d < 3; ++d)
+                    {
+                        const int kn = next[d];
+                        if (kn < 0 || (verts[kn].w >= 0) == (verts[k].w >= 0)) continue;
+                        if (!vertex_uv(kn % m, kn / m, n, 0.5f, 0.5f, ir, ub[0], ub[1])) continue;
+                        Cut& c = cuts[(size_t)k * 3 + d];
+                        if (verts[k].w >= 0) edge_cut(ua, ub, trace, c.uv, c.vx, verts[k]);
+                        else                 edge_cut(ub, ua, trace, c.uv, c.vx, verts[kn]);
+                    }
+                }
+            }
+            auto raster = [&](const FillTri& t) { raster_triangle(t, sc.w, sc.h, add); };
             for (int j = 0; j + 1 < m; ++j)
                 for (int i = 0; i + 1 < m; ++i)
                 {
@@ -184,8 +213,20 @@ Image render_smooth(const Scene& sc, int n)
                                                       uv[q][0], uv[q][1]);
                             vx[q] = verts[t[q]];
                         }
-                        draw_triangle(uv, in_lattice, vx, scale, inv_area, max_edge,
-                                      sc.w, sc.h, trace, add);
+                        if (precut)
+                        {
+                            auto cut = [&](int qa, int qc, float* uv_cut, Vertex& v_cut) {
+                                const Cut& c = cuts[edge_slot(t[qa], t[qc], m)];
+                                uv_cut[0] = c.uv[0];
+                                uv_cut[1] = c.uv[1];
+                                v_cut = c.vx;
+                            };
+                            draw_triangle_cut(uv, in_lattice, vx, scale, inv_area, max_edge,
+                                              sc.w, sc.h, cut, add, raster);
+                        }
+                        else
+                            draw_triangle(uv, in_lattice, vx, scale, inv_area, max_edge,
+                                          sc.w, sc.h, trace, add);
                     }
                 }
         }
@@ -341,6 +382,21 @@ int main(int argc, char** argv)
                 ++fails;
             }
         }
+
+    // Edges cut beforehand: the same image, pixel for pixel.
+    {
+        const Image pre = render_smooth(sc, n_smooth, true);
+        size_t differ = 0;
+        for (int c = 0; c < 3; ++c)
+            for (size_t i = 0; i < smo.c[c].size(); ++i)
+                differ += pre.c[c][i] != smo.c[c][i];
+        std::printf("edges cut beforehand: %zu pixel values differ\n", differ);
+        if (differ)
+        {
+            std::printf("FAIL: cutting edges beforehand changed the image\n");
+            ++fails;
+        }
+    }
 
     const double ratio = ts / tp;
     if (!(ratio > 0.95 && ratio < 1.05))

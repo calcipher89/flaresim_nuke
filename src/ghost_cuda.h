@@ -64,6 +64,8 @@ struct GpuBufferCache
     void*       d_meshes         = nullptr;  std::size_t meshes_bytes     = 0;
     void*       d_mesh_verts     = nullptr;  std::size_t mesh_verts_bytes = 0;
     void*       d_mesh_hist      = nullptr;  std::size_t mesh_hist_bytes  = 0;
+    void*       d_mesh_cuts      = nullptr;  std::size_t mesh_cuts_bytes  = 0;
+    void*       d_cut_queue      = nullptr;  std::size_t cut_queue_bytes  = 0;
 
     // --- Cached pupil grid (rebuilt only when config changes) ---
     void*       d_cached_grid = nullptr;
