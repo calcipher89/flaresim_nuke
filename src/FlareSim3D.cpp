@@ -20,6 +20,7 @@
 // the camera, no flare is produced.
 // ============================================================================
 
+#include "DDImage/Application.h"
 #include "DDImage/Iop.h"
 #include "DDImage/Row.h"
 #include "DDImage/Knobs.h"
@@ -162,6 +163,8 @@ public:
     int         ray_grid_;                 // used when Quality is Custom
     int         quality_;                  // flaresim::Quality
     int         ghost_render_;             // flaresim::GhostRender
+    int         viewer_quality_;           // flaresim::ViewerQuality
+    bool        render_full_;              // set during GUI Write renders
     int         clip_to_;                  // flaresim::ClipTo
     int         overscan_w_, overscan_h_;  // Format + Overscan padding, px
     bool        show_advanced_;
@@ -297,6 +300,8 @@ public:
         , ray_grid_(flaresim::kDefaultRayGrid)
         , quality_(flaresim::kQualityMedium)
         , ghost_render_(flaresim::kRenderPoints)
+        , viewer_quality_(flaresim::kViewerSame)
+        , render_full_(false)
         , clip_to_(flaresim::kClipBBox)
         , overscan_w_(0)
         , overscan_h_(0)
@@ -533,6 +538,13 @@ public:
                    "so a look renders the same at any resolution.  Each step up "
                    "takes about four times as long.\n"
                    "Custom: set Ray Grid yourself.");
+        Enumeration_knob(f, &viewer_quality_, flaresim::kViewerQualityNames,
+                         "viewer_quality", "Viewer Quality");
+        Tooltip(f, flaresim::kViewerQualityTooltip);
+        // Set by FlareSimPlus_Preview.py while a Write renders in the GUI;
+        // never saved, so a script always opens with it off.
+        Bool_knob(f, &render_full_, "render_full", "");
+        SetFlags(f, Knob::HIDDEN | Knob::DO_NOT_WRITE | Knob::NO_ANIMATION | Knob::NO_UNDO);
         Enumeration_knob(f, &ghost_render_, flaresim::kGhostRenderNames,
                          "ghost_render", "Ghost Render");
         Tooltip(f, flaresim::kGhostRenderTooltip);
@@ -825,6 +837,12 @@ public:
             k->is("haze_enable") || k->is("starburst_enable") ||
             k->is("dirt_enable")) {
             sync_simple_ui();
+            return 1;
+        }
+        if (k->is("viewer_quality") && render_full_) {
+            // A GUI render that never reported back leaves render_full on;
+            // touching Viewer Quality clears it.
+            if (Knob* x = knob("render_full")) x->set_value(0);
             return 1;
         }
         if (k->is("quality")) {
@@ -1311,6 +1329,10 @@ public:
 
         GhostConfig cfg;
         cfg.ray_grid              = flaresim::effective_ray_grid(quality_, ray_grid_, pending_fmt_w_);
+        // Viewer Quality: only in the GUI and only when no Write is rendering.
+        if (DD::Image::Application::gui && !render_full_)
+            cfg.ray_grid = flaresim::viewer_ray_grid(cfg.ray_grid, viewer_quality_,
+                                                     pending_fmt_w_);
         cfg.ghost_render          = ghost_render_;
         cfg.gain                  = flare_gain_ * 1000.0f;
         cfg.aperture_blades       = aperture_blades_;

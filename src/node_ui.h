@@ -50,6 +50,32 @@ inline int effective_ray_grid(int quality, int ray_grid, int fmt_w)
     return quality_ray_grid(quality, fmt_w);
 }
 
+// ---- Viewer Quality ----
+// A lower Quality used only while looking at the node in Nuke's Viewer.
+// Renders without a GUI (nuke -x / -t, the farm, Frame Server) ignore it,
+// and FlareSimPlus_Preview.py sets the hidden render_full knob while a
+// Write renders inside the GUI, so every written frame is at full Quality.
+enum ViewerQuality { kViewerSame = 0, kViewerLow, kViewerMedium, kViewerHigh };
+
+static const char* const kViewerQualityNames[] = {
+    "Same as Render", "Low", "Medium", "High", nullptr
+};
+
+static const char* const kViewerQualityTooltip =
+    "Quality used in the Viewer only, for faster interaction and playback.  "
+    "Renders always use Quality: farm and command-line renders, and Write "
+    "renders started from this Nuke.  Never higher than Quality.  While it "
+    "is on, the node shows '(viewer: Low)' or similar in the Node Graph.";
+
+// Ray grid for the Viewer: the Viewer Quality preset, but never more than
+// the render's own grid.
+inline int viewer_ray_grid(int render_grid, int viewer_quality, int fmt_w)
+{
+    if (viewer_quality <= kViewerSame) return render_grid;
+    const int q = std::min(viewer_quality, (int)kViewerHigh) - kViewerLow + kQualityLow;
+    return std::min(render_grid, quality_ray_grid(q, fmt_w));
+}
+
 // ---- Ghost Render ----
 // Points: every ray is a dot (the original renderer).  Smooth: each ghost is
 // drawn as a filled mesh of rays (ghost_mesh.h).  The knob defaults to

@@ -28,6 +28,12 @@ try:
 except Exception as e:
     nuke.warning(f'FlareSim: could not load the panel header: {e}')
 
+try:
+    import FlareSimPlus_Preview
+    FlareSimPlus_Preview.register()
+except Exception as e:
+    nuke.warning(f'FlareSim: could not set up Viewer Quality: {e}')
+
 nuke.menu('Nuke').addCommand(
     'Help/FlareSim+/Self Test',
     'import FlareSimPlus_SelfTest; FlareSimPlus_SelfTest.run()',
