@@ -15,6 +15,7 @@ Looks are read from, in order (an earlier folder wins on a name clash):
 import json
 import os
 import re
+import sys
 
 import nuke
 
@@ -27,8 +28,46 @@ LOOK_VERSION = 1
 FLARESIM_CLASSES = ('FlareSimPlus', 'FlareSimPlus3D')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-BUNDLED_LOOKS_DIR = os.path.join(_HERE, 'looks')
-BUNDLED_LENS_ROOT = os.path.join(_HERE, 'lenses')
+_PLUGIN_EXT = {'win32': '.dll', 'darwin': '.dylib'}.get(sys.platform, '.so')
+
+
+def plugin_dirs():
+    """Folders holding the FlareSimPlus plugin, best first.
+
+    Usually just the folder of this file, but a facility install may keep
+    the .py files in nuke/ and the compiled files in a per-version folder
+    below it (nuke/15.1/EL9.x86_64/), like the original FlareSim does.
+    The loaded plugin wins, then plugins found on the plugin path, with
+    ones inside this install ahead of any other copy."""
+    want = 'FlareSimPlus' + _PLUGIN_EXT
+    found = []
+    for flags in ((), (nuke.ALL,)):
+        try:
+            paths = nuke.plugins(*flags)
+        except Exception:
+            paths = []
+        for p in paths:
+            if os.path.basename(p) == want:
+                d = os.path.dirname(os.path.abspath(p))
+                if d not in found:
+                    found.append(d)
+    here = os.path.normcase(_HERE) + os.sep
+    found.sort(key=lambda d: not (os.path.normcase(d) + os.sep).startswith(here))
+    return found
+
+
+def install_path(name):
+    """name next to this file, or else next to the plugin; the first that
+    exists, or the path next to this file when neither does."""
+    for d in [_HERE] + plugin_dirs():
+        path = os.path.join(d, name)
+        if os.path.exists(path):
+            return path
+    return os.path.join(_HERE, name)
+
+
+BUNDLED_LOOKS_DIR = install_path('looks')
+BUNDLED_LENS_ROOT = install_path('lenses')
 USER_LOOKS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'looks')
 USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lenses')
 

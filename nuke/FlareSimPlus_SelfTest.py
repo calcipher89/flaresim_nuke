@@ -155,8 +155,14 @@ def check_gpu(report):
 
 
 def _plugin_file(name):
+    import FlareSimPlus_Looks
     ext = {'win32': '.dll', 'darwin': '.dylib'}.get(sys.platform, '.so')
-    return os.path.join(_HERE, name + ext)
+    return FlareSimPlus_Looks.install_path(name + ext)
+
+
+def _install_path(name):
+    import FlareSimPlus_Looks
+    return FlareSimPlus_Looks.install_path(name)
 
 
 def check_install(report):
@@ -172,7 +178,7 @@ def check_install(report):
                        '%s missing from the install folder' % os.path.basename(path))
     for name in ('menu.py', 'FlareSimPlus_LensBrowser.py', 'FlareSimPlus_Looks.py',
                  'FlareSimPlus_Header.py', 'icons', 'looks', 'lenses'):
-        if not os.path.exists(os.path.join(_HERE, name)):
+        if not os.path.exists(_install_path(name)):
             report.add(FAIL, '%s missing from the install folder' % name)
     if not os.access(_HERE, os.W_OK):
         report.add(INFO, 'Install folder is read-only (fine for a shared install)')
@@ -209,8 +215,9 @@ def check_plugin_load(report):
             report.add(FAIL, 'Could not load the %s plugin' % cls, str(e))
             continue
         loaded = [p for p in nuke.plugins() if os.path.splitext(os.path.basename(p))[0] == cls]
-        if loaded and os.path.normcase(os.path.dirname(os.path.abspath(loaded[0]))) != \
-                os.path.normcase(_HERE):
+        # Fine when it is in this folder or a per-version folder under it.
+        if loaded and not (os.path.normcase(os.path.dirname(os.path.abspath(loaded[0])))
+                           + os.sep).startswith(os.path.normcase(_HERE) + os.sep):
             report.add(WARN, '%s was loaded from another folder' % cls,
                        '%s\nThis self-test is in %s' % (loaded[0], _HERE))
         node = None
