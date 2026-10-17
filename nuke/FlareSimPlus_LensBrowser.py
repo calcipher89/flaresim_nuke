@@ -47,7 +47,7 @@ QShortcut = getattr(QtWidgets, 'QShortcut', None) or QtGui.QShortcut
 FLARESIM_CLASSES = FlareSimPlus_Looks.FLARESIM_CLASSES
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-BUNDLED_LENS_ROOT = os.path.join(_HERE, 'lenses')
+BUNDLED_LENS_ROOT = FlareSimPlus_Looks.BUNDLED_LENS_ROOT
 USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lenses')
 
 
@@ -330,12 +330,16 @@ def preview_library():
     candidates = []
     if os.environ.get('FLARESIM_PREVIEW_LIB'):
         candidates.append(os.environ['FLARESIM_PREVIEW_LIB'])
-    candidates += [os.path.join(_HERE, n) for n in names]
+    # Next to this file, or next to the FlareSimPlus plugin when a facility
+    # install keeps the compiled files in their own folder.
+    dirs = [_HERE] + FlareSimPlus_Looks.plugin_dirs()
+    candidates += [os.path.join(d, n) for d in dirs for n in names]
     path = next((c for c in candidates if os.path.isfile(c)), None)
     if not path:
         _lib_error = ('The live preview library (%s) was not found next to '
-                      'FlareSimPlus_LensBrowser.py. Rebuild and reinstall FlareSim to '
-                      'get the preview.' % names[0])
+                      'FlareSimPlus_LensBrowser.py or the FlareSimPlus plugin '
+                      '(looked in %s). Copy it there, or set FLARESIM_PREVIEW_LIB '
+                      'to its full path.' % (names[0], ', '.join(dirs)))
         return None, _lib_error
     try:
         lib = ctypes.CDLL(path)
