@@ -1,172 +1,201 @@
 {
   "flaresim_look_version": 1,
   "name": "Hawk APL style 100mm 2x",
-  "description": "Hawk APL style 2x anamorphic: thin pale streak, warm pink oval ghosts, strong starburst and veil. Built from reference footage, not a Vantage prescription.",
+  "description": "Hawk APL style 2x anamorphic: faint lavender streak, large red-pink oval ghost below the light, soft glow. Tuned against reference footage of the real lens at f/3; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
   "lens": "anamorphic/Hawk_APL_Style_100mm_2x.lens",
   "knobs": {
     "flare_gain": 10.0,
-    "aperture_blades": 0,
+    "aperture_blades": 6,
+    "aperture_rotation": 20,
     "spectral_samples": 3,
     "spectral_jitter": true,
-    "ghost_blur": 0.004,
+    "ghost_blur": 0.0025,
     "ghost_blur_passes": 3,
     "haze_enable": true,
-    "haze_gain": 0.3,
+    "haze_gain": 0.63,
+    "haze_radius": 0.15,
     "starburst_enable": true,
-    "starburst_gain": 100.0,
-    "surf_gain_0": 4.0,
+    "starburst_gain": 2000,
+    "starburst_scale": 0.3,
+    "surf_gain_0": 0.25,
     "surf_color_0": [
-      0.85,
-      0.92,
-      1.0
-    ],
-    "surf_gain_1": 4.0,
-    "surf_color_1": [
-      0.85,
-      0.92,
-      1.0
-    ],
-    "surf_gain_2": 4.0,
-    "surf_color_2": [
-      0.85,
-      0.92,
-      1.0
-    ],
-    "surf_gain_3": 4.0,
-    "surf_color_3": [
-      0.85,
-      0.92,
-      1.0
-    ],
-    "surf_color_4": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_1": 0.25,
+    "surf_color_1": [
+      0.984,
+      1.0,
+      0.997
+    ],
+    "surf_gain_2": 4.2877,
+    "surf_color_2": [
+      1.0,
+      0.832,
+      0.923
+    ],
+    "surf_gain_3": 0.25,
+    "surf_color_3": [
+      0.984,
+      1.0,
+      0.997
+    ],
+    "surf_gain_4": 0.25,
+    "surf_color_4": [
+      0.984,
+      1.0,
+      0.997
+    ],
+    "surf_gain_5": 4.2877,
     "surf_color_5": [
       1.0,
-      0.75,
-      0.85
+      0.832,
+      0.923
     ],
+    "surf_gain_6": 0.25,
     "surf_color_6": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_7": 0.25,
     "surf_color_7": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_8": 0.25,
     "surf_color_8": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_9": 0.25,
     "surf_color_9": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_10": 0.25,
     "surf_color_10": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_11": 0.25,
     "surf_color_11": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_12": 0.25,
     "surf_color_12": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_13": 0.25,
     "surf_color_13": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_14": 0.25,
     "surf_color_14": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_15": 0.25,
     "surf_color_15": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_16": 20,
     "surf_color_16": [
-      1.0,
-      0.75,
-      0.85
+      1,
+      0.35,
+      0.4
     ],
+    "surf_gain_17": 0.25,
     "surf_color_17": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_18": 0.25,
     "surf_color_18": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_19": 0.25,
     "surf_color_19": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_20": 0.25,
     "surf_color_20": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_21": 0.25,
     "surf_color_21": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_22": 0.25,
     "surf_color_22": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_23": 20,
     "surf_color_23": [
-      1.0,
-      0.75,
-      0.85
+      1,
+      0.35,
+      0.4
     ],
+    "surf_gain_24": 0.25,
     "surf_color_24": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_25": 0.25,
     "surf_color_25": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_26": 0.25,
     "surf_color_26": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_27": 0.25,
     "surf_color_27": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_28": 0.25,
     "surf_color_28": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ],
+    "surf_gain_29": 0.25,
     "surf_color_29": [
+      0.984,
       1.0,
-      0.75,
-      0.85
+      0.997
     ]
   }
 }

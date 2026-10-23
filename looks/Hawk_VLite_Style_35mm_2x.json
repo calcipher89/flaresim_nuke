@@ -1,58 +1,147 @@
 {
   "flaresim_look_version": 1,
   "name": "Hawk V-Lite style 35mm 2x",
-  "description": "Hawk V-Lite style 2x anamorphic: long blue streak across frame, faint ghosts, light veil. Built from reference footage, not a Vantage prescription.",
+  "description": "Hawk V-Lite style 2x anamorphic: long saturated blue streak, soft glow. Tuned against reference footage of the real lens at f/2.2; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
   "lens": "anamorphic/Hawk_VLite_Style_35mm_2x.lens",
   "knobs": {
     "flare_gain": 10.0,
-    "aperture_blades": 0,
+    "aperture_blades": 7,
+    "aperture_rotation": 0,
     "spectral_samples": 3,
     "spectral_jitter": true,
-    "ghost_blur": 0.003,
+    "ghost_blur": 0.0025,
     "ghost_blur_passes": 3,
     "haze_enable": true,
-    "haze_gain": 0.1,
-    "starburst_enable": false,
-    "surf_gain_0": 3.0,
+    "haze_gain": 0.63,
+    "haze_radius": 0.15,
+    "starburst_enable": true,
+    "starburst_gain": 4000,
+    "starburst_scale": 0.3,
+    "surf_gain_0": 0.25,
     "surf_color_0": [
-      0.6,
-      0.75,
-      1.0
+      1.0,
+      1.0,
+      0.998
     ],
-    "surf_gain_1": 3.0,
+    "surf_gain_1": 0.25,
     "surf_color_1": [
-      0.6,
-      0.75,
-      1.0
+      1.0,
+      1.0,
+      0.998
     ],
-    "surf_gain_2": 3.0,
+    "surf_gain_2": 3.038,
     "surf_color_2": [
-      0.6,
-      0.75,
+      0.48,
+      0.77,
       1.0
     ],
-    "surf_gain_3": 3.0,
+    "surf_gain_3": 3.038,
     "surf_color_3": [
-      0.6,
-      0.75,
+      0.48,
+      0.77,
       1.0
     ],
-    "surf_gain_4": 0.3,
-    "surf_gain_5": 0.3,
-    "surf_gain_6": 0.3,
-    "surf_gain_7": 0.3,
-    "surf_gain_8": 0.3,
-    "surf_gain_9": 0.3,
-    "surf_gain_10": 0.3,
-    "surf_gain_11": 0.3,
-    "surf_gain_12": 0.3,
-    "surf_gain_13": 0.3,
-    "surf_gain_14": 0.3,
-    "surf_gain_15": 0.3,
-    "surf_gain_16": 0.3,
-    "surf_gain_17": 0.3,
-    "surf_gain_18": 0.3,
-    "surf_gain_19": 0.3,
-    "surf_gain_20": 0.3
+    "surf_gain_4": 0.25,
+    "surf_color_4": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_5": 0.25,
+    "surf_color_5": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_6": 0.25,
+    "surf_color_6": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_7": 0.25,
+    "surf_color_7": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_8": 0.25,
+    "surf_color_8": [
+      1,
+      1,
+      1
+    ],
+    "surf_gain_9": 0.25,
+    "surf_color_9": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_10": 0.25,
+    "surf_color_10": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_11": 0.25,
+    "surf_color_11": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_12": 0.25,
+    "surf_color_12": [
+      1,
+      1,
+      1
+    ],
+    "surf_gain_13": 0.25,
+    "surf_color_13": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_14": 0.25,
+    "surf_color_14": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_15": 0.25,
+    "surf_color_15": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_16": 0.25,
+    "surf_color_16": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_17": 0.25,
+    "surf_color_17": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_18": 0.25,
+    "surf_color_18": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_19": 0.25,
+    "surf_color_19": [
+      1.0,
+      1.0,
+      0.998
+    ],
+    "surf_gain_20": 0.25,
+    "surf_color_20": [
+      1.0,
+      1.0,
+      0.998
+    ]
   }
 }

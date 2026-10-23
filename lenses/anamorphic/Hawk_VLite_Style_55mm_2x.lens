@@ -2,11 +2,15 @@
 #
 # Front anamorphic made by lenses/make_anamorphic.py from
 #   lens_files/Leica_50mm_F1.4_(Leica_Summilux-M_50mm_F1.4).lens (scaled to 55mm)
+# scaled to 55mm, with the iris set to f/2.8 (the stop of the reference footage).
 # A Galilean cylindrical attachment (BK7 glass, coating 0) in front of the
-# original lens.  Horizontal field 2x wider (squeeze 2.000x paraxial), vertical
+# original lens.  Horizontal field 2x wider (squeeze 2x paraxial), vertical
 # unchanged; focal_length below is the vertical (taking lens) focal length.
+# The attachment's apertures are 1.5x make_anamorphic.py's default so
+# off-axis ghosts are not clipped.
 # NOT a Vantage Hawk prescription (none is public).  A stand-in for flare
-# work, matched by eye to Hawk V-Lite test footage: long blue streak, faint ghosts.
+# work, tuned against Hawk V-Lite test footage: long blue streak, small blue
+# ghost mirrored below the light, soft glow.
 # See looks/Hawk_VLite_Style_55mm_2x.json for the matching look.
 
 name: Hawk V-Lite style 55mm 2x
@@ -15,22 +19,22 @@ focal_length: 55
 surfaces:
 # radius     thickness   ior      abbe   semi_ap   coating  type
 # --- Front anamorphic attachment: 2x squeeze, cylinder axes vertical ---
-  -56.331    3.000      1.51680  64.2   36.41     0        cyl_y     # plano-concave cylinder, F = -109
-  0          99.045     1.00000  0.0    36.41     0                  # flat back, air gap (solved: afocal)
-  0          12.100     1.51680  64.2   45.51     0                  # flat front of the positive cylinder
-  -112.662   15.000     1.00000  0.0    45.51     0        cyl_y     # plano-convex cylinder, F = +218
+  -56.331  3.000  1.51680  64.2  54.6150  0  cyl_y   # plano-concave cylinder, F = -109
+  0  99.045  1.00000  0.0  54.6150  0   # flat back, air gap (solved: afocal)
+  0  12.100  1.51680  64.2  68.2650  0   # flat front of the positive cylinder
+  -112.662  15.000  1.00000  0.0  68.2650  0  cyl_y   # plano-convex cylinder, F = +218
 # --- Taking lens ---
 # radius       thickness    ior      abbe     semi_ap   coating
-  51.3795  6.7632  1.79128  47.40  39.5745  1
-  231.2830  1.3803  1.00000  0.00  39.5745  0
-  23.3687  8.1435  1.64515  57.80  35.2019  1
-  82.8669  3.0896  1.69416  30.90  35.2019  1
-  16.5641  6.2531  1.00000  0.00  24.4470  0
-  stop  4.9269  1.00000  0.00  24.0241  0
-  -21.4088  2.2404  1.67158  32.90  23.5195  1
-  45.0685  8.4195  1.74793  44.70  27.0419  1
-  -32.5104  0.2761  1.00000  0.00  27.0419  0
-  321.9781  3.7267  1.79128  47.40  30.1005  1
-  -97.4457  0.2761  1.00000  0.00  30.1005  0
-  165.7658  2.8135  1.79128  47.40  32.3751  1
-  -221.2955  30.0453  1.00000  0.00  32.3751  0
+  51.3780  6.7630  1.79128  47.40  39.5734  1
+  231.2764  1.3803  1.00000  0.00  39.5734  0
+  23.3680  8.1433  1.64515  57.80  35.2009  1
+  82.8645  3.0895  1.69416  30.90  35.2009  1
+  16.5636  6.2529  1.00000  0.00  24.4463  0
+  stop  4.9268  1.00000  0.00  5.9463  0
+  -21.4082  2.2403  1.67158  32.90  23.5188  1
+  45.0672  8.4193  1.74793  44.70  27.0411  1
+  -32.5095  0.2761  1.00000  0.00  27.0411  0
+  321.9689  3.7266  1.79128  47.40  30.0996  1
+  -97.4429  0.2761  1.00000  0.00  30.0996  0
+  165.7610  2.8134  1.79128  47.40  32.3742  1
+  -221.2891  30.0444  1.00000  0.00  32.3742  0

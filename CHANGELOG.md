@@ -7,7 +7,7 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 ### Added
 - Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
 - Viewer Quality: a lower Quality for the Viewer only; renders always use full Quality. (#46)
-- Six Hawk-style 2x anamorphic lenses with matching looks, built by eye from Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, faint ghosts) and Hawk APL style 30/50/100mm (thin pale streak, warm oval ghosts, starburst). `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`.
+- Six Hawk-style 2x anamorphic lenses with matching looks, tuned against Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, small blue mirrored ghost) and Hawk APL style 30/50/100mm (pale streak, oval ghosts, starburst on the 50). Streak length, mirrored ghost, veil and colours measured from light-on minus light-off frames; irises set to the footage's stops. `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`.
 - `FLARESIM_TRACE_LOG`: set it to a file path and both nodes log each update, compute (and whether Nuke cancelled it) and first row served, for tracking down Viewer refresh problems.
 
 ### Changed
