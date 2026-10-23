@@ -75,6 +75,8 @@ USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lens
 # threshold, camera/FOV, seeds) are deliberately left out.
 LOOK_KNOBS = (
     'flare_gain',
+    'res_independent',
+    'res_ref_width',
     'pupil_jitter',
     'aperture_blades',
     'aperture_rotation',

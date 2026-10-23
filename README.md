@@ -32,7 +32,7 @@ Looks saved before the rename apply as before.
 
 ### Simpler Node Panel
 
-The node opens with just the main controls: Lens Browser, Source, Matte, **Quality**, **Viewer Quality**, **Ghost Render**, **Flare Gain**, **Ghost Blur** and **Output**. Tick **Show Advanced** to see everything else (Source Extraction, Pupil Jitter, Camera, Distance, Aperture, Spectral, Highlight, Blur Passes, Sample Radius, Edge Blend, Source Cap). Hidden settings still apply, and looks and the Lens Browser still set them.
+The node opens with just the main controls: Lens Browser, Source, Matte, **Quality**, **Viewer Quality**, **Ghost Render**, **Flare Gain**, **Resolution Independent**, **Ghost Blur** and **Output**. Tick **Show Advanced** to see everything else (Source Extraction, Pupil Jitter, Camera, Distance, Aperture, Spectral, Highlight, Blur Passes, Sample Radius, Edge Blend, Source Cap). Hidden settings still apply, and looks and the Lens Browser still set them.
 
 - **Quality** — **Low**, **Medium** (default), **High**, **Ultra** or **Custom**. The presets follow the image width, about 128, 256, 512 and 1024 rays across on a 1920 plate, so a look renders the same at any resolution. Each step up takes about four times as long. **Custom** shows **Ray Grid** to set it yourself. Scripts saved with their own Ray Grid open as Custom and keep it; scripts on the old default (64) now render at Medium. Looks no longer set the ray grid.
 - **Viewer Quality** — a lower Quality (Low, Medium or High) used only in Nuke's Viewer, for faster interaction and playback. Every render uses **Quality**: farm and command-line renders ignore Viewer Quality, and a Write rendered from the open Nuke switches the nodes to full Quality while it runs. It is never higher than Quality, and the node shows `(viewer: Low)` or similar in the Node Graph while it is on. Default: Same as Render.
@@ -53,6 +53,10 @@ For an undistort → FlareSim → redistort workflow. **Clip To** in the Output 
 - **Format + Overscan** — the format grown by **Overscan** (width, height) pixels on each side, so ghosts that fall outside the frame are kept for redistorting.
 
 FOV still matches the format, so ghosts land in the same place whichever you pick. Ghost Blur is sized from the format in Format and Format + Overscan, so changing the overscan doesn't change the blur. The matte now works across its whole bbox, so a matte that covers the overscan also hides lights out there.
+
+### Resolution Independent
+
+Off by default, the flare's brightness depends on the plate size: a placed light (Manual XY, FlareSim3D) spreads the same ghost light over 4 times the pixels at 4K, so its ghosts are a quarter as bright, while Auto Detect finds 4 times the lights at 4K, so its haze, starburst and lens dirt get brighter. Tick **Resolution Independent** (under Flare Gain) and the flare is scaled to look the way it does at **Reference Width** (Show Advanced, default 1920): a look tuned on a 2K plate matches on the same plate at 4K, and Surface and Ghost Override offsets are in Reference Width pixels. Sizes (Ghost Blur, Haze Radius, Starburst Size) already follow the frame. Light Size is still in the plate's pixels. Looks save both knobs.
 
 ### FlareSim3D — Camera + Axis driven flares
 

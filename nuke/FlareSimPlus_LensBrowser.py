@@ -1081,7 +1081,13 @@ def lenses_near_focal(lenses, focal):
 
 
 def _format_width(node):
-    """Width of the node's format in pixels, for surface offsets."""
+    """Width of the pixels the node's offsets are in: Reference Width with
+    Resolution Independent on, otherwise the node's format width."""
+    try:
+        if node['res_independent'].value():
+            return max(int(round(node['res_ref_width'].value())), 1)
+    except Exception:
+        pass
     for get in (lambda: node.format().width(), lambda: node.width(),
                 lambda: nuke.root().format().width()):
         try:

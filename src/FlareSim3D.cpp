@@ -162,6 +162,14 @@ public:
     const char* lens_file_;
     float       source_intensity_;
     float       flare_gain_;
+    bool        res_independent_;  // Resolution Independent
+    float       res_ref_width_;    // ... at this format width
+    // Resolution Independent: format width / Reference Width, else 1.
+    float res_scale() const
+    {
+        return (res_independent_ && pending_fmt_w_ > 0)
+            ? (float)pending_fmt_w_ / std::max(res_ref_width_, 1.0f) : 1.0f;
+    }
     int         ray_grid_;                 // used when Quality is Custom
     int         quality_;                  // flaresim::Quality
     int         ghost_render_;             // flaresim::GhostRender
@@ -308,6 +316,8 @@ public:
         , ghost_overrides_("")
         , source_intensity_(8.0f)
         , flare_gain_(10.0f)
+        , res_independent_(false)
+        , res_ref_width_(1920.0f)
         , ray_grid_(flaresim::kDefaultRayGrid)
         , quality_(flaresim::kQualityMedium)
         , ghost_render_(flaresim::kRenderPoints)
@@ -571,6 +581,21 @@ public:
         Float_knob(f, &flare_gain_, "flare_gain", "Flare Gain");
         SetRange(f, 0.0, 50.0);
         Tooltip(f, "Ghost intensity multiplier.  Default 10.");
+        Bool_knob(f, &res_independent_, "res_independent", "Resolution Independent");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "The flare looks the same at any resolution: a look tuned "
+                   "on a 2K plate matches on the same plate at 4K.\n"
+                   "Without it, ghosts get fainter at higher resolutions (the "
+                   "same light is spread over more pixels).  On, they are "
+                   "scaled to look the way they do at Reference Width, and "
+                   "Surface and Ghost Override offsets are in Reference Width "
+                   "pixels.  Off by default, so older scripts render as "
+                   "before.");
+        adv_.add(f, Float_knob(f, &res_ref_width_, "res_ref_width", "Reference Width"));
+        SetRange(f, 640.0, 8192.0);
+        Tooltip(f, "With Resolution Independent on: the format width the "
+                   "flare is matched at.  1920 (the default) for looks tuned "
+                   "on HD plates.");
 
         static const char* const kJitterModes[] = {
             "Off", "Stratified", "Halton", nullptr
@@ -865,6 +890,7 @@ public:
             const bool over = (clip_to_ == flaresim::kClipOverscan);
             if (Knob* x = knob("overscan_w")) x->enable(over);
             if (Knob* x = knob("overscan_h")) x->enable(over);
+            if (Knob* x = knob("res_ref_width")) x->enable(res_independent_);
             for (const char* name : { "haze_gain", "haze_radius", "haze_passes", "haze_shape", "haze_tint" })
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
             for (const char* name : { "starburst_gain", "starburst_scale", "starburst_tint",
@@ -886,6 +912,7 @@ public:
         }
         if (k->is("show_advanced") || k->is("clip_to") ||
             k->is("haze_enable") || k->is("starburst_enable") ||
+            k->is("res_independent") ||
             k->is("dirt_enable")) {
             sync_simple_ui();
             return 1;
@@ -1404,6 +1431,9 @@ public:
                                                      pending_fmt_w_);
         cfg.ghost_render          = ghost_render_;
         cfg.gain                  = flare_gain_ * 1000.0f;
+        // Resolution Independent: each light spreads the same ghost
+        // energy over k^2 times the pixels, so it is k^2 brighter.
+        cfg.gain                 *= res_scale() * res_scale();
         cfg.aperture_blades       = aperture_blades_;
         cfg.aperture_rotation_deg = aperture_rotation_;
         static const int kSpecCounts[] = {3, 5, 7, 9, 11, 15, 21, 31};
@@ -1487,6 +1517,7 @@ public:
                 if (sa >= 0 && sa < MAX_SURFS_UI) { ox += surf_offx_[sa]; oy += surf_offy_[sa]; }
                 if (sb >= 0 && sb < MAX_SURFS_UI) { ox += surf_offx_[sb]; oy += surf_offy_[sb]; }
                 if (go) { ox += go->ox; oy += go->oy; }
+                ox *= res_scale();  oy *= res_scale();
                 eo.push_back(ox); eo.push_back(oy);
 
                 float sc = 1;
