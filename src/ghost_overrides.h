@@ -23,7 +23,7 @@
 //     streak=g[,l[,t]]  a thin horizontal line through the ghost, as an
 //                     anamorphic lens draws through its focused ghosts.
 //                     g: its light, as a share of the ghost's (1 = as much
-//                     light as the ghost); l: how far it reaches, t: its
+//                     light as the whole ghost, off-frame parts included); l: how far it reaches, t: its
 //                     thickness, both fractions of the diagonal (defaults
 //                     0.15 and 0.001)
 //     streak_color=r,g,b  colours the streak, on top of the ghost's colour

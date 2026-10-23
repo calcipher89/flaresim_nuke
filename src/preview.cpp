@@ -804,7 +804,12 @@ FSP_API int fsp_render(void* handle, const FspParams* p,
             sf.fmt_w = w;  sf.fmt_h = h;
             sf.diag = diag;
             flaresim::FlareExtras fx;
-            fx.set_ghost_streaks(flaresim::trace_ghost_streaks(pv.lens, streaks, { o.src }, o.cfg, sf));
+            // The preview draws each channel at its own wavelength, with no
+            // spectral mixing: its streaks are traced the same way.
+            GhostConfig scfg = o.cfg;
+            scfg.spectral_samples = 3;
+            scfg.spectral_jitter = 0;
+            fx.set_ghost_streaks(flaresim::trace_ghost_streaks(pv.lens, streaks, { o.src }, scfg, sf));
             std::vector<float>* ch[3] = { &pv.r, &pv.g, &pv.b };
             for (int y = 0; y < h; ++y)
                 for (int c = 0; c < 3; ++c)

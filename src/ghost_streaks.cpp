@@ -17,8 +17,11 @@ namespace flaresim {
 namespace {
 
 // Pupil samples per side for the trace: enough for a ghost's centre and
-// light, cheap next to the render.
+// light, cheap next to the render.  A ghost that only a corner of the
+// pupil reaches gets few of them, so it is traced again on the finer grid.
 constexpr int kGrid = 12;
+constexpr int kFineGrid = 40;
+constexpr int kMinHits = 8;
 
 // The same round / polygonal iris as the ghost render's pupil grid.
 bool in_iris(float u, float v, int blades, float rot)
@@ -30,6 +33,62 @@ bool in_iris(float u, float v, int blades, float rot)
     float s = std::fmod(std::atan2(v, u) - rot, sector);
     if (s < 0.0f) s += sector;
     return std::sqrt(r2) * std::cos(s - sector * 0.5f) <= std::cos((float)M_PI / blades);
+}
+
+// The render's wavelength samples and how much each adds to R, G and B
+// (mirrors launch_ghost_cuda): 3 samples are the R, G, B wavelengths at
+// full weight; more are spread over 400-700 nm with normalised CIE-like
+// weights.  With Spectral Jitter the render moves each ray's wavelength
+// within its sample's bin and re-weights it, so the expected weights are
+// the bin's average.
+struct SpectralSample { float lambda; float w[3]; };
+
+float cie(int c, float l)
+{
+    if (c == 0) {
+        const float a = (l - 600.0f) / 70.0f, b = (l - 450.0f) / 30.0f;
+        return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) + 0.22f * std::exp(-0.5f * b * b));
+    }
+    const float a = c == 1 ? (l - 545.0f) / 55.0f : (l - 445.0f) / 45.0f;
+    return std::max(0.0f, std::exp(-0.5f * a * a));
+}
+
+std::vector<SpectralSample> spectral_samples(const GhostConfig& cfg)
+{
+    const int ns = std::max(3, cfg.spectral_samples);
+    std::vector<SpectralSample> out(ns);
+    float sum[3] = { 0.0f, 0.0f, 0.0f };
+    float bin;
+    if (ns == 3) {
+        for (int s = 0; s < 3; ++s) {
+            out[s].lambda = cfg.wavelengths[s];
+            for (int c = 0; c < 3; ++c) out[s].w[c] = s == c ? 1.0f : 0.0f;
+        }
+        for (int c = 0; c < 3; ++c) sum[c] = cie(c, 450.0f) + cie(c, 550.0f) + cie(c, 650.0f);
+        bin = 100.0f;
+    } else {
+        for (int s = 0; s < ns; ++s) {
+            out[s].lambda = 400.0f + 300.0f * s / (ns - 1);
+            for (int c = 0; c < 3; ++c) { out[s].w[c] = cie(c, out[s].lambda); sum[c] += out[s].w[c]; }
+        }
+        for (auto& o : out)
+            for (int c = 0; c < 3; ++c) o.w[c] = sum[c] > 1e-9f ? o.w[c] / sum[c] : 0.0f;
+        bin = 300.0f / (ns - 1);
+    }
+    bin *= std::max(0.0f, cfg.spectral_jitter_scale);
+    if (cfg.spectral_jitter && bin > 0.1f) {
+        constexpr int kSub = 16;
+        for (auto& o : out)
+            for (int c = 0; c < 3; ++c) {
+                float m = 0.0f;
+                for (int k = 0; k < kSub; ++k) {
+                    const float l = o.lambda + ((k + 0.5f) / kSub - 0.5f) * bin;
+                    m += cie(c, std::max(380.0f, std::min(720.0f, l)));
+                }
+                o.w[c] = sum[c] > 1e-9f ? m / kSub / sum[c] : 0.0f;
+            }
+    }
+    return out;
 }
 
 } // namespace
@@ -54,15 +113,20 @@ std::vector<GhostStreak> trace_ghost_streaks(const LensSystem& lens,
 
     // Pupil points, as the render samples the front of the lens.
     const float rot = cfg.aperture_rotation_deg * (float)M_PI / 180.0f;
-    std::vector<std::pair<float, float>> pupil;
-    for (int j = 0; j < kGrid; ++j)
-        for (int i = 0; i < kGrid; ++i) {
-            const float u = (i + 0.5f) / kGrid * 2.0f - 1.0f;
-            const float v = (j + 0.5f) / kGrid * 2.0f - 1.0f;
-            if (in_iris(u, v, cfg.aperture_blades, rot)) pupil.push_back({ u, v });
-        }
-    if (pupil.empty()) return out;
-    const float ray_weight = 1.0f / pupil.size();
+    auto make_pupil = [&](int n) {
+        std::vector<std::pair<float, float>> pts;
+        for (int j = 0; j < n; ++j)
+            for (int i = 0; i < n; ++i) {
+                const float u = (i + 0.5f) / n * 2.0f - 1.0f;
+                const float v = (j + 0.5f) / n * 2.0f - 1.0f;
+                if (in_iris(u, v, cfg.aperture_blades, rot)) pts.push_back({ u, v });
+            }
+        return pts;
+    };
+    const std::vector<std::pair<float, float>> coarse = make_pupil(kGrid);
+    if (coarse.empty()) return out;
+    std::vector<std::pair<float, float>> fine;   // made when first needed
+    const std::vector<SpectralSample> spectra = spectral_samples(cfg);
     const float front_R = lens.surfaces[0].semi_aperture;
     const float start_z = lens.surfaces[0].z - 20.0f;
     const float fcx = f.fmt_x0_in_buf + f.fmt_w * 0.5f;
@@ -83,31 +147,51 @@ std::vector<GhostStreak> trace_ghost_streaks(const LensSystem& lens,
             // A line exp(-|dx| / length) across and a Gaussian up holds
             // 2 length x sqrt(2 pi) sigma times its peak.
             const float spread = 2.0f * s.length * std::sqrt(2.0f * (float)M_PI) * s.sigma;
+            // The ghost's light and centre in each channel, as the render
+            // adds them up.
+            double sum[3], sx[3], sy[3], ray_weight = 0.0;
+            auto trace = [&](const std::vector<std::pair<float, float>>& pupil) {
+                int hits = 0;
+                for (int c = 0; c < 3; ++c) sum[c] = sx[c] = sy[c] = 0.0;
+                for (const SpectralSample& sm : spectra) {
+                    double ws = 0.0, wx = 0.0, wy = 0.0;
+                    for (const auto& p : pupil) {
+                        Ray ray;
+                        ray.origin = Vec3f(p.first * front_R, p.second * front_R, start_z);
+                        ray.dir = dir;
+                        const TraceResult tr = trace_ghost_ray(ray, lens, g.pair.surf_a, g.pair.surf_b,
+                                                               sm.lambda);
+                        if (!tr.valid || !(tr.weight > 0.0f) || !std::isfinite(tr.position.x) ||
+                            !std::isfinite(tr.position.y))
+                            continue;
+                        float px = (tr.position.x / (2.0f * f.sensor_half_w) + 0.5f) * f.fmt_w + f.fmt_x0_in_buf;
+                        float py = (tr.position.y / (2.0f * f.sensor_half_h) + 0.5f) * f.fmt_h + f.fmt_y0_in_buf;
+                        px = fcx + (px - fcx) * g.sx + g.ox;
+                        py = fcy + (py - fcy) * g.sy + g.oy;
+                        ws += tr.weight;
+                        wx += tr.weight * px;
+                        wy += tr.weight * py;
+                        ++hits;
+                    }
+                    for (int c = 0; c < 3; ++c) {
+                        sum[c] += sm.w[c] * ws;
+                        sx[c]  += sm.w[c] * wx;
+                        sy[c]  += sm.w[c] * wy;
+                    }
+                }
+                ray_weight = 1.0 / (double)pupil.size();
+                return hits;
+            };
+            if (trace(coarse) < kMinHits * (int)spectra.size() / 3) {
+                if (fine.empty()) fine = make_pupil(kFineGrid);
+                trace(fine);
+            }
             bool any = false;
             for (int c = 0; c < 3; ++c) {
-                double sum = 0.0, sx = 0.0, sy = 0.0;
-                for (const auto& p : pupil) {
-                    Ray ray;
-                    ray.origin = Vec3f(p.first * front_R, p.second * front_R, start_z);
-                    ray.dir = dir;
-                    const TraceResult tr = trace_ghost_ray(ray, lens, g.pair.surf_a, g.pair.surf_b,
-                                                           cfg.wavelengths[c]);
-                    if (!tr.valid || !(tr.weight > 0.0f) || !std::isfinite(tr.position.x) ||
-                        !std::isfinite(tr.position.y))
-                        continue;
-                    float px = (tr.position.x / (2.0f * f.sensor_half_w) + 0.5f) * f.fmt_w + f.fmt_x0_in_buf;
-                    float py = (tr.position.y / (2.0f * f.sensor_half_h) + 0.5f) * f.fmt_h + f.fmt_y0_in_buf;
-                    px = fcx + (px - fcx) * g.sx + g.ox;
-                    py = fcy + (py - fcy) * g.sy + g.oy;
-                    sum += tr.weight;
-                    sx  += tr.weight * px;
-                    sy  += tr.weight * py;
-                }
-                if (sum <= 0.0) { s.peak[c] = 0.0f; s.x[c] = s.y[c] = -1e7f; continue; }
-                s.x[c] = (float)(sx / sum);
-                s.y[c] = (float)(sy / sum);
-                // The ghost's light in this channel, as the render adds it up.
-                const float energy = (float)sum * ray_weight * cfg.gain * g.boost * g.col[c] * src[c];
+                if (sum[c] <= 0.0) { s.peak[c] = 0.0f; s.x[c] = s.y[c] = -1e7f; continue; }
+                s.x[c] = (float)(sx[c] / sum[c]);
+                s.y[c] = (float)(sy[c] / sum[c]);
+                const float energy = (float)(sum[c] * ray_weight) * cfg.gain * g.boost * g.col[c] * src[c];
                 s.peak[c] = g.gain * std::max(g.tint[c], 0.0f) * energy / spread;
                 any = any || s.peak[c] > 0.0f;
             }
