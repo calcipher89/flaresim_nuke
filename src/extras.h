@@ -14,6 +14,15 @@
 //   Starburst  the aperture's Fraunhofer diffraction pattern (the squared
 //              magnitude of the FFT of the iris shape) drawn at each light,
 //              wider in red than in blue as in a real lens.
+//   Rays       thin rays fanning out from the brightest lights, of random
+//              lengths: light caught by scratches, edges and the haze.
+//   Ring       a soft rainbow ring around the brightest lights (an oval on
+//              an anamorphic lens), red outside, blue inside.
+//   Ghost streaks
+//              thin horizontal lines through single ghosts (Ghost
+//              Overrides "streak="), worked out with the ghosts
+//              (ghost_streaks.h) and drawn here.  They belong to the
+//              ghosts: they come out in flare.rgb.
 //
 // Brightness:
 //   The haze carries the light's energy, as in a real lens: bigger or
@@ -33,6 +42,9 @@
 
 namespace flaresim {
 
+// Rays and rings cost a lot per light; the brightest lights get them.
+constexpr int kMaxRayLights = 8;
+
 struct ExtrasConfig
 {
     float haze_gain        = 0.0f;   // 0 = off
@@ -44,6 +56,9 @@ struct ExtrasConfig
     // veiling glare of a real lens does.  The total light stays the same.
     float haze_shape       = 0.0f;
     float haze_tint[3]     = { 1.0f, 1.0f, 1.0f };   // multiplies the light's colour
+    // Width over height of the haze: 1 = round, 2 = twice as wide as tall
+    // (the oval glow of an anamorphic lens).  Its area stays the same.
+    float haze_aspect      = 1.0f;
     float starburst_gain   = 0.0f;   // 0 = off
     float starburst_scale  = 0.15f;  // spike length, fraction of the diagonal
     float starburst_tint[3] = { 1.0f, 1.0f, 1.0f };
@@ -52,11 +67,42 @@ struct ExtrasConfig
     float starburst_fringe = 1.0f;
     // Softens the spikes: blur, as a fraction of the spike length.
     float starburst_softness = 0.0f;
+    // How far the spikes stay bright.  0 = as in a real lens (they fade
+    // as 1/distance^2 from a bright core), 1 = as 1/distance, 2 = even
+    // along their length: long thin spikes next to a small core.
+    float starburst_reach  = 0.0f;
+    // Rays: thin rays of random lengths fanning out from the light.
+    float rays_gain        = 0.0f;   // 0 = off
+    int   rays_count       = 48;
+    float rays_length      = 0.25f;  // longest rays, fraction of the diagonal
+    float rays_width       = 0.3f;   // degrees: wedges widening away from the light
+    float rays_spread      = 360.0f; // degrees of the fan, 360 = all round
+    float rays_angle       = -90.0f; // direction of the fan, degrees, 0 = right, 90 = up
+    int   rays_seed        = 1;
+    float rays_tint[3]     = { 1.0f, 1.0f, 1.0f };
+    // Ring: a soft rainbow ring around the light.
+    float ring_gain        = 0.0f;   // 0 = off
+    float ring_radius      = 0.1f;   // fraction of the diagonal
+    float ring_aspect      = 1.0f;   // width over height, area kept
+    float ring_width       = 0.08f;  // thickness, fraction of the radius
+    float ring_rainbow     = 1.0f;   // red outside, blue inside; 0 = white
+    float ring_arc         = 360.0f; // degrees of the ring drawn, 360 = all
+    float ring_angle       = -90.0f; // middle of the arc drawn, degrees, 90 = up
+    float ring_tint[3]     = { 1.0f, 1.0f, 1.0f };
     int   aperture_blades  = 0;      // 0 = round (no spikes, Airy rings)
     float aperture_rotation = 0.0f;  // degrees
     int   max_starbursts   = 32;     // brightest lights that get spikes
     float dirt_gain        = 0.0f;   // 0 = off: light falling on lens dirt
     float dirt_spread      = 0.4f;   // how far it reaches, fraction of the diagonal
+};
+
+// A thin horizontal line through a ghost (Ghost Overrides "streak=").
+struct GhostStreak
+{
+    float x[3], y[3];      // centre in each channel, buffer pixels (+y up)
+    float peak[3];         // value on the line at its centre
+    float length = 1.0f;   // pixels to fall to 1/e along the line
+    float sigma  = 1.0f;   // thickness (Gaussian sigma), pixels
 };
 
 // Where the lights are.  Lights are stored as angles (BrightPixel); these
@@ -84,9 +130,10 @@ struct GlowField
 
     // Energy-conserving: Gain 1 gives ref_peak of a light of 8 x 8 pixels
     // at radius ref_radius; a wider glow is fainter.
+    // aspect: width over height of the glow (1 = round), area kept.
     void compute(float gain, float radius, int passes, float ref_radius,
                  float ref_peak, const ExtrasFrame& frame,
-                 const std::vector<BrightPixel>& lights);
+                 const std::vector<BrightPixel>& lights, float aspect = 1.0f);
     void clear();
     void tint(const float rgb[3]);
     bool empty() const { return ch[0].empty(); }
@@ -114,11 +161,16 @@ public:
     bool has_haze()      const { return !haze_.empty() || !haze_core_[0].empty()
                                         || !haze_core_[1].empty(); }
     bool has_starburst() const { return !star_[0].empty(); }
+    bool has_ghost_streaks() const { return !streaks_.empty(); }
     bool has_dirt()      const { return !dirt_.empty(); }
     bool has_dirt_image() const { return !dirt_img_[0].empty(); }
     bool has_scatter()   const { return !scatter_.empty(); }
     bool empty()         const { return !has_haze() && !has_starburst() && !has_dirt()
-                                        && !has_scatter(); }
+                                        && !has_scatter() && !has_ghost_streaks(); }
+
+    // Ghost streaks (see ghost_streaks.h).  Call after compute().
+    void set_ghost_streaks(std::vector<GhostStreak> streaks);
+    void add_ghost_streak_row(int c, int y, int x0, int x1, float* dst) const;
 
     // Lens dirt: the dirt image for the whole buffer (buf_w x buf_h per
     // channel, row 0 at the bottom), defocused into soft blobs the shape
@@ -149,6 +201,11 @@ public:
 private:
     void compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& frame,
                            const std::vector<BrightPixel>& lights);
+    void compute_rays(const ExtrasConfig& cfg, const ExtrasFrame& frame,
+                      const std::vector<BrightPixel>& lights);
+    void compute_ring(const ExtrasConfig& cfg, const ExtrasFrame& frame,
+                      const std::vector<BrightPixel>& lights);
+    void ensure_star_buffer(const ExtrasFrame& frame);
 
     GlowField haze_;
     GlowField haze_core_[2];   // Haze Shape: tighter glows near the light
@@ -157,7 +214,7 @@ private:
     int dirt_w_ = 0, dirt_h_ = 0;
     GlowField scatter_;   // veil scattered by the lit dirt
 
-    // Starburst at full resolution.
+    // Starburst, rays and ring at full resolution.
     std::vector<float> star_[3];
     int star_w_ = 0, star_h_ = 0;
 
@@ -167,6 +224,9 @@ private:
     int   psf_blades_ = -1;
     float psf_rotation_ = 0.0f;
     float psf_softness_ = 0.0f;
+    float psf_reach_ = 0.0f;
+
+    std::vector<GhostStreak> streaks_;
 };
 
 // Defocus an image (in place) with a blob the shape of the iris, radius
@@ -183,8 +243,10 @@ float box_blur_peak(int radius, int passes);
 
 // Separable box blur, in place.  With zero_edges, pixels outside count as
 // black, so light spreading past the edge is lost (as a lens's haze leaves
-// the frame); otherwise edges average over the pixels inside.
+// the frame); otherwise edges average over the pixels inside.  radius_y < 0
+// blurs as far up as across.
 void box_blur_inplace(float* buf, int w, int h, int radius, int passes,
-                      std::vector<float>& tmp, bool zero_edges = false);
+                      std::vector<float>& tmp, bool zero_edges = false,
+                      int radius_y = -1);
 
 } // namespace flaresim

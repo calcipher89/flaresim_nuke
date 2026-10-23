@@ -77,6 +77,7 @@ set(FLARESIM_CORE_SOURCES
     src/ghost.cpp
     src/lens_path.cpp
     src/extras.cpp
+    src/ghost_streaks.cpp
 )
 
 # ===========================================================================

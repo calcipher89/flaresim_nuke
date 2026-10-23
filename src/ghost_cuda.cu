@@ -79,6 +79,12 @@ void GpuBufferCache::release()
     cudaFree(d_mesh_cuts);   d_mesh_cuts  = nullptr;  mesh_cuts_bytes  = 0;
     cudaFree(d_cut_queue);   d_cut_queue  = nullptr;  cut_queue_bytes  = 0;
 
+    // Ghosts with their own blur
+    cudaFree(d_soft_r);  d_soft_r = nullptr;
+    cudaFree(d_soft_g);  d_soft_g = nullptr;
+    cudaFree(d_soft_b);  d_soft_b = nullptr;
+    soft_floats = 0;
+
     // Blur resources
     cudaFree(blur_a);  blur_a = nullptr;
     cudaFree(blur_b);  blur_b = nullptr;
@@ -831,7 +837,8 @@ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
 // ===========================================================================
 
 struct GPUPair   { int surf_a, surf_b; float area_boost; int tile_cx, tile_cy;
-                   float color_r, color_g, color_b; float offset_x, offset_y; float scale; };
+                   float color_r, color_g, color_b; float offset_x, offset_y; float scale;
+                   float scale_y; };
 struct GPUSource { float angle_x, angle_y, r, g, b; };
 struct GPUSample { float u, v; };  // entrance-pupil grid point
 // One wavelength sample with pre-computed RGB colour weights.
@@ -1042,8 +1049,8 @@ __global__ void ghost_kernel(
             // Scale relative to format center, then apply offset.
             float fcx = fmt_x0_in_buf + fmt_w * 0.5f;
             float fcy = fmt_y0_in_buf + fmt_h * 0.5f;
-            px = fcx + (px - fcx) * pair.scale + pair.offset_x;
-            py = fcy + (py - fcy) * pair.scale + pair.offset_y;
+            px = fcx + (px - fcx) * pair.scale   + pair.offset_x;
+            py = fcy + (py - fcy) * pair.scale_y + pair.offset_y;
 
             if (!isfinite(px) || !isfinite(py)) continue;
 
@@ -1197,8 +1204,8 @@ bool d_mesh_ray(const Surface* surfs, int n_surfs, const GPUPair& pair,
     float py = (res.position.y / (2.0f * f.sensor_half_h) + 0.5f) * f.fmt_h + f.fmt_y0;
     const float fcx = f.fmt_x0 + f.fmt_w * 0.5f;
     const float fcy = f.fmt_y0 + f.fmt_h * 0.5f;
-    px = fcx + (px - fcx) * pair.scale + pair.offset_x;
-    py = fcy + (py - fcy) * pair.scale + pair.offset_y;
+    px = fcx + (px - fcx) * pair.scale   + pair.offset_x;
+    py = fcy + (py - fcy) * pair.scale_y + pair.offset_y;
     if (!isfinite(px) || !isfinite(py)) return false;
 
     out.x = fmaxf(-1.0e7f, fminf(1.0e7f, px));
@@ -1669,7 +1676,8 @@ void launch_ghost_cuda(
     std::string*                    out_error,
     const std::vector<float>*       pair_colors,
     const std::vector<float>*       pair_offsets,
-    const std::vector<float>*       pair_scales)
+    const std::vector<float>*       pair_scales,
+    const std::vector<float>*       pair_scales_y)
 {
     if (active_pairs.empty() || sources.empty()) return;
 
@@ -1847,11 +1855,15 @@ void launch_ghost_cuda(
         if (pair_scales && (int)pair_scales->size() > i) {
             sc = (*pair_scales)[i];
         }
+        float sc_y = sc;
+        if (pair_scales_y && (int)pair_scales_y->size() > i) {
+            sc_y = (*pair_scales_y)[i];
+        }
         gpu_pairs[i] = { active_pairs[i].surf_a,
                          active_pairs[i].surf_b,
                          pair_area_boosts[i],
                          -99999, -99999,
-                         cr, cg, cb, ox, oy, sc };
+                         cr, cg, cb, ox, oy, sc, sc_y };
     }
 
     // Sort pairs by descending trace cost so expensive pairs launch first.
@@ -2353,11 +2365,80 @@ void readback_gpu_output(float* cpu_r, float* cpu_g, float* cpu_b, float* cpu_a,
 // Readback of channel G overlaps with blur of B and alpha.
 // ===========================================================================
 
+__global__ void add_kernel(float* __restrict__ dst, const float* __restrict__ src, int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) dst[i] += src[i];
+}
+
+void accumulate_soft_ghosts_cuda(int w, int h, int blur_radius, int blur_passes,
+                                 bool first, GpuBufferCache& cache, std::string* out_error)
+{
+    const size_t n_px      = (size_t)w * h;
+    const size_t n_bytes_f = n_px * sizeof(float);
+    if (n_px == 0 || !cache.d_out_r || cache.out_floats < n_px) return;
+
+    auto report = [&](cudaError_t e, const char* site) {
+        fprintf(stderr, "FlareSim soft ghosts error at %s -- %s\n",
+                site, cudaGetErrorString(e));
+        if (out_error && out_error->empty()) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "soft ghosts error at %s -- %s",
+                     site, cudaGetErrorString(e));
+            *out_error = buf;
+        }
+    };
+
+    if (n_px > cache.soft_floats) {
+        cudaFree(cache.d_soft_r);  cache.d_soft_r = nullptr;
+        cudaFree(cache.d_soft_g);  cache.d_soft_g = nullptr;
+        cudaFree(cache.d_soft_b);  cache.d_soft_b = nullptr;
+        cache.soft_floats = 0;
+        cudaError_t e = cudaMalloc(&cache.d_soft_r, n_bytes_f);
+        if (e == cudaSuccess) e = cudaMalloc(&cache.d_soft_g, n_bytes_f);
+        if (e == cudaSuccess) e = cudaMalloc(&cache.d_soft_b, n_bytes_f);
+        if (e != cudaSuccess) { report(e, "d_soft"); return; }
+        cache.soft_floats = n_px;
+        first = true;
+    }
+    if (n_px > cache.blur_floats) {
+        cudaFree(cache.blur_a);  cache.blur_a = nullptr;
+        cudaFree(cache.blur_b);  cache.blur_b = nullptr;
+        cache.blur_floats = 0;
+        cudaError_t e = cudaMalloc(&cache.blur_a, n_bytes_f);
+        if (e == cudaSuccess) e = cudaMalloc(&cache.blur_b, n_bytes_f);
+        if (e != cudaSuccess) { report(e, "blur"); return; }
+        cache.blur_floats = n_px;
+    }
+
+    float* d_ch[3]   = { cache.d_out_r,  cache.d_out_g,  cache.d_out_b };
+    float* d_soft[3] = { cache.d_soft_r, cache.d_soft_g, cache.d_soft_b };
+    const bool do_blur = (blur_radius >= 1 && blur_passes >= 1);
+    constexpr int BLK = 256;
+    const int grid = ((int)n_px + BLK - 1) / BLK;
+    for (int ch = 0; ch < 3; ++ch) {
+        if (do_blur) {
+            cudaMemcpy(cache.blur_a, d_ch[ch], n_bytes_f, cudaMemcpyDeviceToDevice);
+            for (int p = 0; p < blur_passes; ++p) {
+                launch_blur_h_on_stream(cache.blur_a, cache.blur_b, w, h, blur_radius, nullptr);
+                launch_blur_v_on_stream(cache.blur_b, cache.blur_a, w, h, blur_radius, nullptr);
+            }
+            cudaMemcpy(d_ch[ch], cache.blur_a, n_bytes_f, cudaMemcpyDeviceToDevice);
+        }
+        if (first) cudaMemcpy(d_soft[ch], d_ch[ch], n_bytes_f, cudaMemcpyDeviceToDevice);
+        else       add_kernel<<<grid, BLK>>>(d_soft[ch], d_ch[ch], (int)n_px);
+        cudaMemset(d_ch[ch], 0, n_bytes_f);
+    }
+    const cudaError_t e = cudaDeviceSynchronize();
+    if (e != cudaSuccess) report(e, "accumulate");
+}
+
 void launch_blur_alpha_readback_async(
     float* cpu_r, float* cpu_g, float* cpu_b, float* cpu_a,
     int w, int h, int blur_radius, int blur_passes,
     GpuBufferCache& cache, std::string* out_error,
-    float highlight_clip, float highlight_knee, int highlight_metric)
+    float highlight_clip, float highlight_knee, int highlight_metric,
+    bool add_soft)
 {
     const size_t n_px       = (size_t)w * h;
     const size_t n_bytes_f  = n_px * sizeof(float);
@@ -2465,6 +2546,14 @@ void launch_blur_alpha_readback_async(
         }
     }
 
+    // ---- Ghosts with their own blur, added to the rest ----
+    if (add_soft && cache.soft_floats >= n_px)
+    {
+        float* d_soft[3] = { cache.d_soft_r, cache.d_soft_g, cache.d_soft_b };
+        for (int ch = 0; ch < 3; ++ch)
+            add_kernel<<<cvt_grid, CVT_BLK, 0, comp>>>(d_ch[ch], d_soft[ch], (int)n_px);
+    }
+
     // ---- Soft highlight compression (after blur, before alpha) ----
     if (do_clip)
     {
@@ -2500,6 +2589,68 @@ void launch_blur_alpha_readback_async(
 
     for (int i = 0; i < 4; ++i)
         cudaEventDestroy(ev[i]);
+}
+
+bool render_ghosts_cuda(
+    const LensSystem& lens, const std::vector<GhostPair>& active_pairs,
+    const std::vector<float>& pair_area_boosts, const std::vector<BrightPixel>& sources,
+    float sensor_half_w, float sensor_half_h, int w, int h,
+    int fmt_w, int fmt_h, int fmt_x0_in_buf, int fmt_y0_in_buf,
+    const GhostConfig& config, GpuBufferCache& cache, std::string* out_error,
+    const std::vector<float>& pair_colors, const std::vector<float>& pair_offsets,
+    const std::vector<float>& pair_scales, const std::vector<float>& pair_scales_y,
+    const std::vector<int>* pair_blur_px, int blur_radius, int blur_passes,
+    float* cpu_r, float* cpu_g, float* cpu_b, float* cpu_a)
+{
+    const int n = (int)active_pairs.size();
+    // Pair indices by their own blur radius; -1 = the node's blur.
+    std::vector<std::pair<int, std::vector<int>>> groups;
+    std::vector<int> plain;
+    for (int i = 0; i < n; ++i) {
+        const int r = (pair_blur_px && (int)pair_blur_px->size() > i) ? (*pair_blur_px)[i] : -1;
+        if (r < 0) { plain.push_back(i); continue; }
+        auto g = std::find_if(groups.begin(), groups.end(),
+                              [&](const std::pair<int, std::vector<int>>& x) { return x.first == r; });
+        if (g == groups.end()) groups.push_back({ r, { i } });
+        else g->second.push_back(i);
+    }
+
+    // Draw a subset of the pairs.
+    auto draw = [&](const std::vector<int>& idx) {
+        std::vector<GhostPair> pairs;  std::vector<float> boosts, cols, offs, sc, scy;
+        for (int i : idx) {
+            pairs.push_back(active_pairs[i]);
+            boosts.push_back(pair_area_boosts[i]);
+            for (int c = 0; c < 3; ++c)
+                cols.push_back((int)pair_colors.size() > i * 3 + c ? pair_colors[i * 3 + c] : 1.0f);
+            for (int c = 0; c < 2; ++c)
+                offs.push_back((int)pair_offsets.size() > i * 2 + c ? pair_offsets[i * 2 + c] : 0.0f);
+            const float s = (int)pair_scales.size() > i ? pair_scales[i] : 1.0f;
+            sc.push_back(s);
+            scy.push_back((int)pair_scales_y.size() > i ? pair_scales_y[i] : s);
+        }
+        launch_ghost_cuda(lens, pairs, boosts, sources, sensor_half_w, sensor_half_h,
+                          nullptr, nullptr, nullptr, w, h, fmt_w, fmt_h,
+                          fmt_x0_in_buf, fmt_y0_in_buf, config, cache,
+                          /*skip_readback=*/true, out_error, &cols, &offs, &sc, &scy);
+    };
+
+    bool soft = false;
+    for (const auto& g : groups) {
+        draw(g.second);
+        if (config.stop_requested()) return false;
+        accumulate_soft_ghosts_cuda(w, h, g.first, blur_passes, !soft, cache, out_error);
+        soft = true;
+    }
+    if (!plain.empty()) {
+        draw(plain);
+        if (config.stop_requested()) return false;
+    }
+    // (With no plain pairs the drawn buffers are already clear.)
+    launch_blur_alpha_readback_async(cpu_r, cpu_g, cpu_b, cpu_a, w, h, blur_radius, blur_passes,
+                                     cache, out_error, config.highlight_clip,
+                                     config.highlight_knee, config.highlight_metric, soft);
+    return true;
 }
 
 // ===========================================================================

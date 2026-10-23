@@ -58,6 +58,28 @@ int main()
     check(bad == 8, "eight bad lines");
     check(list.size() == 1 && near(list[0].gain, 4.0f), "last of a repeated ghost wins");
 
+    // Stretch, per-ghost blur and streaks.
+    list = parse_ghost_overrides(
+        "4-9 scale=0.5,2 blur=0.004 streak=0.3\n"
+        "5-8 streak=1.5,0.4,0.002 streak_color=0.5,0.7,1\n"
+        "6-7 scale=0.7\n", &bad);
+    check(bad == 0 && list.size() == 3, "stretch, blur and streak lines read");
+    g = find_ghost_override(list, 4, 9);
+    check(g && near(g->scale, 0.5f) && near(g->scale_up(), 2.0f), "scale across and up");
+    check(g && near(g->blur, 0.004f), "own blur");
+    check(g && near(g->streak, 0.3f) && near(g->streak_length, kStreakLength) &&
+          near(g->streak_thickness, kStreakThickness), "streak with default length");
+    g = find_ghost_override(list, 5, 8);
+    check(g && near(g->streak, 1.5f) && near(g->streak_length, 0.4f) &&
+          near(g->streak_thickness, 0.002f) && near(g->streak_col[0], 0.5f) &&
+          near(g->streak_col[2], 1.0f), "streak length, thickness and colour");
+    check(g && g->blur < 0.0f && near(g->scale_up(), 1.0f), "no blur: the node's");
+    g = find_ghost_override(list, 6, 7);
+    check(g && near(g->scale_up(), 0.7f), "one scale value: the same up");
+    list = parse_ghost_overrides("4-9 scale=1,0\n4-9 blur=-1\n4-9 streak=1,0\n"
+                                 "4-9 streak=1,2,3,4\n4-9 streak_color=1,2", &bad);
+    check(bad == 5 && list.empty(), "bad stretch, blur and streak values");
+
     list = parse_ghost_overrides("", &bad);
     check(list.empty() && bad == 0, "empty text");
     list = parse_ghost_overrides("1-2 GAIN=2 Colour=0.5,0.5,1 OFF", &bad);

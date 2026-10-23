@@ -15,7 +15,18 @@
 //     gain=g          multiplies the ghost's brightness
 //     color=r,g,b     multiplies its colour (a single value tints grey)
 //     scale=s         grows or shrinks it about the frame centre
+//     scale=sx,sy     the same, by different amounts across and up: a
+//                     ghost becomes a flat oval or a tall bar
 //     offset=x,y      shifts it, in the node's pixels, +y up
+//     blur=b          its own Ghost Blur (a fraction of the diagonal, as
+//                     the node's), in place of the node's: soft rims
+//     streak=g[,l[,t]]  a thin horizontal line through the ghost, as an
+//                     anamorphic lens draws through its focused ghosts.
+//                     g: its light, as a share of the ghost's (1 = as much
+//                     light as the ghost); l: how far it reaches, t: its
+//                     thickness, both fractions of the diagonal (defaults
+//                     0.15 and 0.001)
+//     streak_color=r,g,b  colours the streak, on top of the ghost's colour
 //     off             leaves it out ("on" puts it back)
 //
 // Lines starting with '#' are comments.  A line that can't be read is
@@ -33,14 +44,26 @@
 
 namespace flaresim {
 
+// Defaults of the streak setting's optional values.
+constexpr float kStreakLength    = 0.15f;
+constexpr float kStreakThickness = 0.001f;
+
 struct GhostOverride
 {
     int   a = -1, b = -1;              // surfaces, a < b
     bool  on = true;
     float gain = 1.0f;
     float col[3] = { 1.0f, 1.0f, 1.0f };
-    float scale = 1.0f;
+    float scale = 1.0f;                // across (and up, unless scale_y is set)
+    float scale_y = -1.0f;             // up; < 0 = the same as scale
     float ox = 0.0f, oy = 0.0f;        // node pixels, +y up
+    float blur = -1.0f;                // < 0 = the node's Ghost Blur
+    float streak = 0.0f;               // 0 = no streak
+    float streak_length = kStreakLength;        // fraction of the diagonal
+    float streak_thickness = kStreakThickness;  // fraction of the diagonal
+    float streak_col[3] = { 1.0f, 1.0f, 1.0f };
+
+    float scale_up() const { return scale_y > 0.0f ? scale_y : scale; }
 };
 
 namespace detail {
@@ -144,11 +167,27 @@ inline std::vector<GhostOverride> parse_ghost_overrides(const std::string& text,
                 ok = (n == 1 || n == 3);
                 if (ok) for (int c = 0; c < 3; ++c) g.col[c] = std::max(v[n == 1 ? 0 : c], 0.0f);
             } else if (key == "scale") {
-                ok = detail::read_floats(val, v, 1) == 1 && v[0] > 0.0f;
-                if (ok) g.scale = v[0];
+                const int n = detail::read_floats(val, v, 2);
+                ok = n >= 1 && v[0] > 0.0f && (n == 1 || v[1] > 0.0f);
+                if (ok) { g.scale = v[0]; g.scale_y = n == 2 ? v[1] : -1.0f; }
             } else if (key == "offset") {
                 ok = detail::read_floats(val, v, 2) == 2;
                 if (ok) { g.ox = v[0]; g.oy = v[1]; }
+            } else if (key == "blur") {
+                ok = detail::read_floats(val, v, 1) == 1 && v[0] >= 0.0f;
+                if (ok) g.blur = v[0];
+            } else if (key == "streak") {
+                const int n = detail::read_floats(val, v, 3);
+                ok = n >= 1 && v[0] >= 0.0f && (n < 2 || v[1] > 0.0f) && (n < 3 || v[2] > 0.0f);
+                if (ok) {
+                    g.streak = v[0];
+                    g.streak_length    = n >= 2 ? v[1] : kStreakLength;
+                    g.streak_thickness = n >= 3 ? v[2] : kStreakThickness;
+                }
+            } else if (key == "streak_color" || key == "streak_colour" || key == "streak_tint") {
+                const int n = detail::read_floats(val, v, 3);
+                ok = (n == 1 || n == 3);
+                if (ok) for (int c = 0; c < 3; ++c) g.streak_col[c] = std::max(v[n == 1 ? 0 : c], 0.0f);
             } else {
                 ok = false;
             }

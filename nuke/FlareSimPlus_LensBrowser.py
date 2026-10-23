@@ -1993,12 +1993,35 @@ class LensBrowserWindow(QtWidgets.QWidget):
         for row in (self.ghost_offx, self.ghost_offy):
             row.spin.setRange(-10000.0, 10000.0)
             row.setToolTip('Shift this ghost, in the node\'s pixels.')
+        self.ghost_scale_y = SliderRow(0.25, 6.0, 1.0, decimals=3, step=0.01)
+        self.ghost_scale_y.setToolTip('Grow or shrink this ghost up and down only: a flat '
+                                      'oval or a tall bar.  The same as Scale until you '
+                                      'change it.')
+        # Blur: the lowest value means the node's Ghost Blur.
+        self.ghost_blur = SliderRow(-0.0005, 0.02, -0.0005, decimals=4, step=0.0005)
+        self.ghost_blur.spin.setSpecialValueText('Ghost Blur')
+        self.ghost_blur.setToolTip('Softens this ghost on its own (a blur, as a fraction of '
+                                   'the image diagonal, like Ghost Blur).  At the left end '
+                                   'it uses the node\'s Ghost Blur.')
+        self.ghost_streak = SliderRow(0.0, 2.0, 0.0, decimals=3, step=0.01)
+        self.ghost_streak.setToolTip('A thin horizontal line through this ghost, as an '
+                                     'anamorphic lens draws through small, sharp ghosts.  '
+                                     'Its light as a share of the ghost\'s: 1 = as much '
+                                     'light as the ghost.  0 = none.')
+        self.ghost_streak_len = SliderRow(0.02, 1.0, FlareSimPlus_Looks.STREAK_LENGTH,
+                                          decimals=3, step=0.01)
+        self.ghost_streak_len.setToolTip('How far the streak reaches, as a fraction of the '
+                                         'image diagonal.')
         gf.addRow(self.ghost_on)
         gf.addRow('Gain', self.ghost_gain)
         gf.addRow('Tint', self.ghost_colour_btn)
         gf.addRow('Offset X', self.ghost_offx)
         gf.addRow('Offset Y', self.ghost_offy)
         gf.addRow('Scale', self.ghost_scale)
+        gf.addRow('Scale Up', self.ghost_scale_y)
+        gf.addRow('Blur', self.ghost_blur)
+        gf.addRow('Streak', self.ghost_streak)
+        gf.addRow('Streak Length', self.ghost_streak_len)
         ghost_resets = QtWidgets.QHBoxLayout()
         self.ghost_reset_btn = QtWidgets.QPushButton('Reset Ghost')
         self.ghost_reset_btn.clicked.connect(self._reset_ghost)
@@ -2014,11 +2037,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
         gv.addLayout(gf)
         self._ghost_controls = [self.ghost_on, self.ghost_gain, self.ghost_colour_btn,
                                 self.ghost_offx, self.ghost_offy, self.ghost_scale,
-                                self.ghost_reset_btn]
+                                self.ghost_scale_y, self.ghost_blur, self.ghost_streak,
+                                self.ghost_streak_len, self.ghost_reset_btn]
         self.ghost_on.toggled.connect(lambda v: self._edit_ghost('on', bool(v)))
         for row, key in ((self.ghost_gain, 'gain'), (self.ghost_offx, 'offx'),
                          (self.ghost_offy, 'offy'), (self.ghost_scale, 'scale')):
             row.valueChanged.connect(lambda v, key=key: self._edit_ghost(key, v))
+        self.ghost_scale_y.valueChanged.connect(self._edit_ghost_scale_y)
+        self.ghost_blur.valueChanged.connect(
+            lambda v: self._edit_ghost('blur', None if v < 0.0 else v))
+        self.ghost_streak.valueChanged.connect(lambda v: self._edit_ghost_streak())
+        self.ghost_streak_len.valueChanged.connect(lambda v: self._edit_ghost_streak())
         self.highlight_check = QtWidgets.QCheckBox('Highlight in the preview')
         self.highlight_check.setChecked(True)
         self.highlight_check.setToolTip('Dim the other ghosts in the preview so the picked '
@@ -2302,7 +2331,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
             w.setEnabled(key is not None)
         g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
         rows = (self.ghost_on, self.ghost_gain, self.ghost_offx, self.ghost_offy,
-                self.ghost_scale)
+                self.ghost_scale, self.ghost_scale_y, self.ghost_blur, self.ghost_streak,
+                self.ghost_streak_len)
         for w in rows:
             w.blockSignals(True)
         self.ghost_on.setChecked(bool(g['on']))
@@ -2310,9 +2340,17 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self.ghost_offx.setValue(g['offx'])
         self.ghost_offy.setValue(g['offy'])
         self.ghost_scale.setValue(g['scale'])
+        self.ghost_scale_y.setValue(g['scale'] if g.get('scale_y') is None else g['scale_y'])
+        self.ghost_blur.setValue(-0.0005 if g.get('blur') is None else g['blur'])
+        streak = g.get('streak') or (0.0, FlareSimPlus_Looks.STREAK_LENGTH,
+                                     FlareSimPlus_Looks.STREAK_THICKNESS)
+        self.ghost_streak.setValue(streak[0])
+        self.ghost_streak_len.setValue(streak[1])
         for w in rows:
             w.blockSignals(False)
-        for row in (self.ghost_gain, self.ghost_offx, self.ghost_offy, self.ghost_scale):
+        for row in (self.ghost_gain, self.ghost_offx, self.ghost_offy, self.ghost_scale,
+                    self.ghost_scale_y, self.ghost_blur, self.ghost_streak,
+                    self.ghost_streak_len):
             row._sync_slider(row.value())
         c = g['color']
         swatch = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
@@ -2340,6 +2378,31 @@ class LensBrowserWindow(QtWidgets.QWidget):
             return
         self._set_ghost_value(key, name, value)
         self._update_ghost_list()
+        if name == 'scale':
+            g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
+            if g.get('scale_y') is None:
+                # Scale Up follows Scale until it is changed.
+                self.ghost_scale_y.blockSignals(True)
+                self.ghost_scale_y.setValue(value)
+                self.ghost_scale_y.blockSignals(False)
+                self.ghost_scale_y._sync_slider(value)
+
+    def _edit_ghost_scale_y(self, value):
+        key = self._ghost_key()
+        if key is None:
+            return
+        g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
+        self._edit_ghost('scale_y', None if abs(value - g['scale']) < 1e-6 else value)
+
+    def _edit_ghost_streak(self):
+        key = self._ghost_key()
+        if key is None:
+            return
+        g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
+        thick = (g.get('streak') or (0, 0, FlareSimPlus_Looks.STREAK_THICKNESS))[2]
+        gain = self.ghost_streak.value()
+        self._edit_ghost('streak', (gain, self.ghost_streak_len.value(), thick)
+                         if gain > 0.0 else None)
 
     def _choose_ghost_colour(self):
         key = self._ghost_key()
