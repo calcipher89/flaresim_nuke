@@ -1011,8 +1011,13 @@ __global__ void ghost_kernel(
 
             if (spectral_jitter && spec_bin_width > 0.1f)
             {
-                // Unique seed per (ray, spectral sample, frame)
-                uint32_t ray_id = (uint32_t)(ps_idx * n_grid + grid_idx);
+                // Unique seed per (ray, spectral sample, frame).  Named by
+                // the ghost's surfaces, not its place in this launch, so a
+                // ghost keeps its noise when it is drawn in a group of its
+                // own (Ghost Overrides blur=) or other ghosts are turned off.
+                const uint32_t pair_id = (uint32_t)(pair.surf_a * MAX_SURFACES + pair.surf_b);
+                uint32_t ray_id = (pair_id * (uint32_t)n_sources + (uint32_t)src_idx)
+                                  * (uint32_t)n_grid + (uint32_t)grid_idx;
                 uint32_t seed = d_wang_hash(ray_id * 31u + (uint32_t)s * 7919u + spec_jitter_seed);
                 float offset = d_hash_float(seed) - 0.5f;  // [-0.5, +0.5)
 
