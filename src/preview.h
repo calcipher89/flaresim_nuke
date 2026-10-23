@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define FSP_API_VERSION 2
+#define FSP_API_VERSION 3
 
 typedef struct FspParams
 {
@@ -100,6 +100,12 @@ FSP_API const char* fsp_last_error(void* handle);
 // Per-surface settings for the following renders and picks.  n = 0
 // clears them (every surface on, neutral).  Surfaces past n are neutral.
 FSP_API void        fsp_set_surfaces(void* handle, const FspSurface* surfaces, int n);
+
+// Settings for single ghosts, on top of their surfaces': the node's Ghost
+// Overrides text (see ghost_overrides.h).  Offsets in it are in pixels of
+// an image ref_width wide (the node's format).  "" or null clears them.
+// Returns the number of lines that could not be read.
+FSP_API int         fsp_set_ghost_overrides(void* handle, const char* text, float ref_width);
 
 // Highlight ghosts in the following renders by dimming the rest:
 //   a < 0          no highlight

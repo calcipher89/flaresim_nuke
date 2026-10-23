@@ -122,6 +122,10 @@ if(FLARESIM_BUILD_TESTS)
     target_include_directories(flaresim_extras_test PRIVATE src)
     add_test(NAME haze_starburst COMMAND flaresim_extras_test)
 
+    add_executable(flaresim_ghost_overrides_test src/ghost_overrides_test.cpp)
+    target_include_directories(flaresim_ghost_overrides_test PRIVATE src)
+    add_test(NAME ghost_overrides COMMAND flaresim_ghost_overrides_test)
+
     # Smooth ghost render (ghost_mesh.h) against point splatting, on the CPU.
     add_executable(flaresim_ghost_mesh_test src/ghost_mesh_test.cpp src/ghost.cpp
                    src/lens.cpp src/trace.cpp)

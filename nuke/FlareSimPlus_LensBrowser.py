@@ -313,7 +313,7 @@ class FspSurfaceInfo(ctypes.Structure):
     ]
 
 
-FSP_API_VERSION = 2
+FSP_API_VERSION = 3
 
 _lib = None
 _lib_error = None
@@ -362,6 +362,8 @@ def preview_library():
         lib.fsp_set_surfaces.restype = None
         lib.fsp_set_highlight.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
         lib.fsp_set_highlight.restype = None
+        lib.fsp_set_ghost_overrides.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_float]
+        lib.fsp_set_ghost_overrides.restype = ctypes.c_int
         lib.fsp_surface_info.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                          ctypes.POINTER(FspSurfaceInfo)]
         lib.fsp_surface_info.restype = ctypes.c_int
@@ -550,8 +552,9 @@ class PreviewRenderer(QtCore.QObject):
 
     def request(self, req):
         """req: dict with lens, params (FspParams kwargs), width, height,
-        grid, passes, and optionally surfaces (FspSurface tuples) and
-        highlight (surf_a, surf_b)."""
+        grid, passes, and optionally surfaces (FspSurface tuples),
+        ghosts (Ghost Overrides text, node format width) and highlight
+        (surf_a, surf_b)."""
         with self._cond:
             self._request = dict(req)
             self._serial += 1
@@ -612,6 +615,8 @@ class PreviewRenderer(QtCore.QObject):
         arr, n = surface_array(req.get('surfaces', ()))
         self._lib.fsp_set_surfaces(self._handle, arr, n)
         self._lib.fsp_set_highlight(self._handle, *req.get('highlight', (-1, -1)))
+        ghosts, ref_w = req.get('ghosts', ('', 1920.0))
+        self._lib.fsp_set_ghost_overrides(self._handle, ghosts.encode('utf-8'), float(ref_w))
 
         w, h = req['width'], req['height']
         params = FspParams(**req['params'])
@@ -1538,6 +1543,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
         self._look_dirty = False
         self._sel_surface = -1
         self._ghost = None             # (surf_a, surf_b) of the picked ghost
+        # Settings for single ghosts {(a, b): settings}, the node's Ghost
+        # Overrides; dirty when edited here since last in step with the node.
+        self._ghosts = {}
+        self._ghosts_dirty = False
+        self._ghost_rows = []          # (a, b) of each row of the ghost list
         self._picked = []              # [(a, b, share)] from the last pick
         self._ref_width = 1920         # node format width, for surface offsets
         self._probe = None
@@ -1941,7 +1951,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         ghost_box = QtWidgets.QGroupBox('Pick a Ghost')
         gv = QtWidgets.QVBoxLayout(ghost_box)
         hint = QtWidgets.QLabel('Shift+click (or right-click) a ghost in the preview to '
-                                'see which two surfaces make it.')
+                                'see which two surfaces make it, and change it on its own.')
         hint.setWordWrap(True)
         hint.setStyleSheet('color: #999;')
         gv.addWidget(hint)
@@ -1957,6 +1967,52 @@ class LensBrowserWindow(QtWidgets.QWidget):
         pair_row.addWidget(self.ghost_a_btn)
         pair_row.addWidget(self.ghost_b_btn)
         gv.addLayout(pair_row)
+
+        # This ghost on its own, on top of its two surfaces' settings
+        # (the node's Ghost Overrides).
+        gf = QtWidgets.QFormLayout()
+        self.ghost_on = QtWidgets.QCheckBox('Show this ghost')
+        self.ghost_on.setToolTip('Off leaves out just this ghost; its surfaces\' other '
+                                 'ghosts stay.')
+        self.ghost_gain = SliderRow(0.0, 10.0, 1.0, decimals=3, step=0.05)
+        self.ghost_gain.setToolTip('Brightness of this ghost alone, on top of its '
+                                   'surfaces\' gains.')
+        self.ghost_colour_btn = QtWidgets.QPushButton()
+        self.ghost_colour_btn.setToolTip('Tint for this ghost alone.')
+        self.ghost_colour_btn.clicked.connect(self._choose_ghost_colour)
+        self.ghost_scale = SliderRow(0.25, 3.0, 1.0, decimals=3, step=0.01)
+        self.ghost_scale.setToolTip('Grow or shrink this ghost about the frame centre.')
+        self.ghost_offx = SliderRow(-1000.0, 1000.0, 0.0, decimals=1, step=1.0)
+        self.ghost_offy = SliderRow(-1000.0, 1000.0, 0.0, decimals=1, step=1.0)
+        for row in (self.ghost_offx, self.ghost_offy):
+            row.spin.setRange(-10000.0, 10000.0)
+            row.setToolTip('Shift this ghost, in the node\'s pixels.')
+        gf.addRow(self.ghost_on)
+        gf.addRow('Gain', self.ghost_gain)
+        gf.addRow('Tint', self.ghost_colour_btn)
+        gf.addRow('Offset X', self.ghost_offx)
+        gf.addRow('Offset Y', self.ghost_offy)
+        gf.addRow('Scale', self.ghost_scale)
+        ghost_resets = QtWidgets.QHBoxLayout()
+        self.ghost_reset_btn = QtWidgets.QPushButton('Reset Ghost')
+        self.ghost_reset_btn.clicked.connect(self._reset_ghost)
+        reset_ghosts = QtWidgets.QPushButton('Reset All Ghosts')
+        reset_ghosts.setToolTip('Put every ghost back to its surfaces\' settings.')
+        reset_ghosts.clicked.connect(self._reset_all_ghosts)
+        ghost_resets.addWidget(self.ghost_reset_btn)
+        ghost_resets.addWidget(reset_ghosts)
+        gf.addRow(ghost_resets)
+        self.ghost_changed_label = QtWidgets.QLabel()
+        self.ghost_changed_label.setStyleSheet('color: #999;')
+        gf.addRow(self.ghost_changed_label)
+        gv.addLayout(gf)
+        self._ghost_controls = [self.ghost_on, self.ghost_gain, self.ghost_colour_btn,
+                                self.ghost_offx, self.ghost_offy, self.ghost_scale,
+                                self.ghost_reset_btn]
+        self.ghost_on.toggled.connect(lambda v: self._edit_ghost('on', bool(v)))
+        for row, key in ((self.ghost_gain, 'gain'), (self.ghost_offx, 'offx'),
+                         (self.ghost_offy, 'offy'), (self.ghost_scale, 'scale')):
+            row.valueChanged.connect(lambda v, key=key: self._edit_ghost(key, v))
         self.highlight_check = QtWidgets.QCheckBox('Highlight in the preview')
         self.highlight_check.setChecked(True)
         self.highlight_check.setToolTip('Dim the other ghosts in the preview so the picked '
@@ -1973,6 +2029,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             row.valueChanged.connect(lambda v, key=key: self._edit_surface(key, v))
         self._update_surface_panel()
         self._update_ghost_list()
+        self._update_ghost_panel()
         return tab
 
     # -- lens elements --------------------------------------------------
@@ -2162,15 +2219,30 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._clear_ghost(keep_list=True)
 
     def _update_ghost_list(self):
+        """The picked ghosts, then any other ghost changed here, so a ghost
+        that was turned off can still be found."""
         self.ghost_list.blockSignals(True)
         self.ghost_list.clear()
+        self._ghost_rows = []
         for a, b, share in self._picked:
-            item = QtWidgets.QListWidgetItem('Surfaces %d + %d   %.0f%%' % (a, b, share * 100.0))
+            item = QtWidgets.QListWidgetItem('Surfaces %d + %d   %.0f%%%s'
+                                             % (a, b, share * 100.0, self._ghost_mark(a, b)))
             item.setToolTip('This ghost bounces off surfaces %d and %d and makes %.0f%% of '
                             'the light where you clicked.' % (a, b, share * 100.0))
             self.ghost_list.addItem(item)
+            self._ghost_rows.append((a, b))
         if not self._picked and self.view.pick_marker is not None:
             self.ghost_list.addItem('No ghost there. Try a brighter spot.')
+            self._ghost_rows.append(None)
+        for key in sorted(self._ghosts):
+            if key in self._ghost_rows or not FlareSimPlus_Looks.ghost_changed(self._ghosts[key]):
+                continue
+            item = QtWidgets.QListWidgetItem('Surfaces %d + %d%s' % (key + (self._ghost_mark(*key),)))
+            item.setToolTip('A ghost changed on its own.')
+            self.ghost_list.addItem(item)
+            self._ghost_rows.append(key)
+        if self._ghost in self._ghost_rows:
+            self.ghost_list.setCurrentRow(self._ghost_rows.index(self._ghost))
         self.ghost_list.blockSignals(False)
         has = self._ghost is not None
         self.ghost_a_btn.setEnabled(has)
@@ -2181,11 +2253,18 @@ class LensBrowserWindow(QtWidgets.QWidget):
         else:
             self.ghost_a_btn.setText('Edit A')
             self.ghost_b_btn.setText('Edit B')
+        self._update_ghost_panel()
+
+    def _ghost_mark(self, a, b):
+        g = self._ghosts.get((min(a, b), max(a, b)))
+        if g is None or not FlareSimPlus_Looks.ghost_changed(g):
+            return ''
+        return '   (off)' if not g['on'] else '   (changed)'
 
     def _on_ghost_row(self, row):
-        if not 0 <= row < len(self._picked):
+        if not 0 <= row < len(self._ghost_rows) or self._ghost_rows[row] is None:
             return
-        a, b, _share = self._picked[row]
+        a, b = self._ghost_rows[row]
         self._ghost = (a, b)
         self.diagram.ghost = self._ghost
         self._update_ghost_list()
@@ -2204,6 +2283,95 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self.view.update()
         self._update_ghost_list()
         self.diagram.update()
+
+    def _ghost_key(self):
+        if self._ghost is None:
+            return None
+        a, b = self._ghost
+        return (min(a, b), max(a, b))
+
+    def _update_ghost_panel(self):
+        key = self._ghost_key()
+        for w in self._ghost_controls:
+            w.setEnabled(key is not None)
+        g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
+        rows = (self.ghost_on, self.ghost_gain, self.ghost_offx, self.ghost_offy,
+                self.ghost_scale)
+        for w in rows:
+            w.blockSignals(True)
+        self.ghost_on.setChecked(bool(g['on']))
+        self.ghost_gain.setValue(g['gain'])
+        self.ghost_offx.setValue(g['offx'])
+        self.ghost_offy.setValue(g['offy'])
+        self.ghost_scale.setValue(g['scale'])
+        for w in rows:
+            w.blockSignals(False)
+        for row in (self.ghost_gain, self.ghost_offx, self.ghost_offy, self.ghost_scale):
+            row._sync_slider(row.value())
+        c = g['color']
+        swatch = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
+        self.ghost_colour_btn.setText('None (click to pick)' if all(abs(v - 1.0) < 1e-6 for v in c)
+                                      else '%.2f  %.2f  %.2f' % tuple(c))
+        text_colour = '#000' if swatch.lightnessF() > 0.5 else '#fff'
+        self.ghost_colour_btn.setStyleSheet('background-color: %s; color: %s; min-height: 18px;'
+                                            % (swatch.name(), text_colour))
+        changed = sum(1 for v in self._ghosts.values() if FlareSimPlus_Looks.ghost_changed(v))
+        self.ghost_changed_label.setText(
+            '%d ghost%s changed on its own.' % (changed, '' if changed == 1 else 's')
+            if changed else '')
+
+    def _set_ghost_value(self, key, name, value):
+        g = self._ghosts.setdefault(key, dict(FlareSimPlus_Looks.GHOST_DEFAULT))
+        g[name] = value
+        if not FlareSimPlus_Looks.ghost_changed(g):
+            del self._ghosts[key]
+        self._ghosts_dirty = True
+        self._schedule_render()
+
+    def _edit_ghost(self, name, value):
+        key = self._ghost_key()
+        if key is None:
+            return
+        self._set_ghost_value(key, name, value)
+        self._update_ghost_list()
+
+    def _choose_ghost_colour(self):
+        key = self._ghost_key()
+        if key is None:
+            return
+        c = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)['color']
+        start = QtGui.QColor.fromRgbF(*[min(max(v, 0.0), 1.0) for v in c])
+
+        def apply(colour, key=key):
+            # Tint the ghost the picker was opened for.
+            if not colour.isValid():
+                return
+            self._set_ghost_value(key, 'color', (colour.redF(), colour.greenF(), colour.blueF()))
+            self._update_ghost_list()
+        self._open_colour_picker(start, 'Ghost %d + %d Tint' % key, apply)
+
+    def _reset_ghost(self):
+        key = self._ghost_key()
+        if key is not None and key in self._ghosts:
+            del self._ghosts[key]
+            self._ghosts_dirty = True
+            self._update_ghost_list()
+            self._schedule_render()
+
+    def _reset_all_ghosts(self):
+        if self._ghosts:
+            self._ghosts = {}
+            self._ghosts_dirty = True
+            self._update_ghost_list()
+            self._schedule_render()
+
+    def _set_ghosts(self, ghosts):
+        """Replace every ghost's settings (from a node or a look)."""
+        self._ghosts = dict(ghosts)
+        self._update_ghost_list()
+
+    def _ghost_text(self):
+        return FlareSimPlus_Looks.format_ghost_overrides(self._ghosts)
 
     # -- lens list ------------------------------------------------------
 
@@ -2495,6 +2663,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._set_surfaces(surfaces)
         elif changed:
             self._set_surfaces(default_surfaces())
+            self._set_ghosts({})
             self._surf_all_dirty = True
         if changed:
             self._load_geometry()
@@ -2623,7 +2792,10 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 row.blockSignals(False)
         self._look_extra = {k: v for k, v in values.items()
                             if k not in _EDITED_KNOBS and not _SURF_KNOB_RE.match(k)
+                            and k != FlareSimPlus_Looks.GHOST_KNOB
                             and k not in FlareSimPlus_Looks.SKIPPED_KNOBS}
+        self._set_ghosts(FlareSimPlus_Looks.parse_ghost_overrides(
+            values.get(FlareSimPlus_Looks.GHOST_KNOB, '')))
         if self._look_extra:
             self.extra_label.setText('Also from the look: %d more settings (highlight, '
                                      'spectral...) kept as they are.'
@@ -2635,10 +2807,13 @@ class LensBrowserWindow(QtWidgets.QWidget):
 
     def current_look(self, name='', surfaces=True):
         """The window's settings as a look dict.  With surfaces, it includes
-        the per-surface settings that differ from their defaults."""
+        the per-surface and single-ghost settings that differ from their
+        defaults."""
         knobs = dict(self._look_extra)
         if surfaces:
             knobs.update(surfaces_to_knobs(self._surf[:self._num_surfaces() or None]))
+            if self._ghost_text():
+                knobs[FlareSimPlus_Looks.GHOST_KNOB] = self._ghost_text()
         knobs.update({
             'flare_gain': self.gain.value(),
             'aperture_blades': int(self.blades.value()),
@@ -2735,6 +2910,8 @@ class LensBrowserWindow(QtWidgets.QWidget):
                 k = pattern % i
                 if k in knobs:
                     values[k] = FlareSimPlus_Looks._knob_value(knobs[k])
+        if FlareSimPlus_Looks.GHOST_KNOB in knobs:
+            values[FlareSimPlus_Looks.GHOST_KNOB] = knobs[FlareSimPlus_Looks.GHOST_KNOB].value()
         surfaces = self._set_look_values(values)
         self._ref_width = _format_width(node)
         self._set_camera_focal(node_camera_focal(node), knobs)
@@ -2752,6 +2929,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
             self._set_surfaces(surfaces)
         self._surf_dirty.clear()
         self._surf_all_dirty = False
+        self._ghosts_dirty = False
         self._knob_dirty.clear()
         self._look_dirty = False
         self._schedule_render()
@@ -2809,18 +2987,23 @@ class LensBrowserWindow(QtWidgets.QWidget):
         # look, or a new node, takes them all.
         if not (self._look_dirty or new_node):
             look['knobs'] = {k: v for k, v in look['knobs'].items()
-                             if k in self._knob_dirty or _SURF_KNOB_RE.match(k)}
+                             if k in self._knob_dirty or _SURF_KNOB_RE.match(k)
+                             or k == FlareSimPlus_Looks.GHOST_KNOB}
         if not all_surfaces:
             for i in sorted(self._surf_dirty):
                 state = self._surf[i]
                 for pattern, key in SURF_KNOB_KEYS:
                     v = state[key]
                     look['knobs'][pattern % i] = list(v) if key == 'color' else v
+            # Ghost Overrides are one knob: written whole when edited here.
+            if self._ghosts_dirty:
+                look['knobs'][FlareSimPlus_Looks.GHOST_KNOB] = self._ghost_text()
         warnings = FlareSimPlus_Looks.apply_look(look, nodes, reset_surfaces=all_surfaces)
         self._update_node_headers(nodes, look_name=self._look_name if (self._look_name or not same_lens)
                                   else None)
         self._surf_dirty.clear()
         self._surf_all_dirty = False
+        self._ghosts_dirty = False
         self._knob_dirty.clear()
         self._look_dirty = False
         self._ref_width = _format_width(nodes[0])
@@ -2922,6 +3105,7 @@ class LensBrowserWindow(QtWidgets.QWidget):
         return {
             'lens': self._lens_path,
             'surfaces': self._packed_surfaces(),
+            'ghosts': (self._ghost_text(), float(max(self._ref_width, 1))),
             'highlight': self._highlight(),
             'width': w, 'height': h, 'grid': grid, 'passes': passes,
             'params': dict(

@@ -36,6 +36,7 @@
 #include "occlusion.h"
 #include "node_ui.h"
 #include "ghost.h"
+#include "ghost_overrides.h"
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
 #include "extras.h"
@@ -243,6 +244,8 @@ public:
     float       surf_offy_[MAX_SURFS_UI];
     float       surf_scale_[MAX_SURFS_UI];
     char        surf_labels_[MAX_SURFS_UI][64];
+    // Ghost Overrides text: settings for single ghosts (ghost_overrides.h).
+    const char* ghost_overrides_;
 
     // Name of the look last applied from the Lens Browser, for the header.
     std::string look_name_;
@@ -297,6 +300,7 @@ public:
     explicit FlareSim3D(Node* node)
         : Iop(node)
         , lens_file_("")
+        , ghost_overrides_("")
         , source_intensity_(8.0f)
         , flare_gain_(10.0f)
         , ray_grid_(flaresim::kDefaultRayGrid)
@@ -775,6 +779,17 @@ public:
         Button(f, "surf_select_all",   "Select All");
         Button(f, "surf_deselect_all", "Deselect All");
         Button(f, "surf_reset_gains",  "Reset Gains");
+        Multiline_String_knob(f, &ghost_overrides_, "ghost_overrides", "Ghost Overrides", 4);
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Settings for single ghosts, on top of their two surfaces' "
+                   "settings below.  The Lens Browser writes these when you "
+                   "pick a ghost and change it; you can also type them.  One "
+                   "ghost per line, named by its two surfaces:\n"
+                   "  3-12 gain=2.5 color=1,0.6,0.9 scale=0.8 offset=10,-5\n"
+                   "  4-9 off\n"
+                   "gain and color multiply, scale grows the ghost about the "
+                   "frame centre, offset shifts it in pixels (+y up), off "
+                   "leaves it out.  Lines that can't be read are skipped.");
         for (int k = 0; k < MAX_SURFS_UI; ++k)
         {
             Bool_knob(f, &surf_enabled_[k], s_surf_knob_names.toggle_names[k], surf_labels_[k]);
@@ -1400,6 +1415,10 @@ public:
             eo.reserve(active_pairs.size() * 2);
             es.reserve(active_pairs.size());
 
+            // Ghost Overrides: single ghosts, on top of their surfaces.
+            const std::vector<flaresim::GhostOverride> overrides =
+                flaresim::parse_ghost_overrides(ghost_overrides_ ? ghost_overrides_ : "");
+
             for (int i = 0; i < (int)active_pairs.size(); ++i)
             {
                 const int sa = active_pairs[i].surf_a;
@@ -1407,11 +1426,13 @@ public:
                 const bool a_on = (sa < 0 || sa >= MAX_SURFS_UI) || surf_enabled_[sa];
                 const bool b_on = (sb < 0 || sb >= MAX_SURFS_UI) || surf_enabled_[sb];
                 if (!a_on || !b_on) continue;
+                const flaresim::GhostOverride* go = flaresim::find_ghost_override(overrides, sa, sb);
+                if (go && (!go->on || go->gain <= 0.0f)) continue;
 
                 float ga = (sa >= 0 && sa < MAX_SURFS_UI) ? surf_gain_[sa] : 1.0f;
                 float gb = (sb >= 0 && sb < MAX_SURFS_UI) ? surf_gain_[sb] : 1.0f;
                 ep.push_back(active_pairs[i]);
-                eb.push_back(area_boosts[i] * ga * gb);
+                eb.push_back(area_boosts[i] * ga * gb * (go ? go->gain : 1.0f));
 
                 float cr = 1, cg = 1, cb = 1;
                 if (sa >= 0 && sa < MAX_SURFS_UI) {
@@ -1420,16 +1441,19 @@ public:
                 if (sb >= 0 && sb < MAX_SURFS_UI) {
                     cr *= surf_color_[sb][0]; cg *= surf_color_[sb][1]; cb *= surf_color_[sb][2];
                 }
+                if (go) { cr *= go->col[0]; cg *= go->col[1]; cb *= go->col[2]; }
                 ec.push_back(cr); ec.push_back(cg); ec.push_back(cb);
 
                 float ox = 0, oy = 0;
                 if (sa >= 0 && sa < MAX_SURFS_UI) { ox += surf_offx_[sa]; oy += surf_offy_[sa]; }
                 if (sb >= 0 && sb < MAX_SURFS_UI) { ox += surf_offx_[sb]; oy += surf_offy_[sb]; }
+                if (go) { ox += go->ox; oy += go->oy; }
                 eo.push_back(ox); eo.push_back(oy);
 
                 float sc = 1;
                 if (sa >= 0 && sa < MAX_SURFS_UI) sc *= surf_scale_[sa];
                 if (sb >= 0 && sb < MAX_SURFS_UI) sc *= surf_scale_[sb];
+                if (go) sc *= go->scale;
                 es.push_back(sc);
             }
             active_pairs = std::move(ep);

@@ -79,6 +79,33 @@ int main(int argc, char** argv)
     std::printf("surface %d off: %d of %d ghosts left\n", pa[0], fewer, all_pairs);
     if (fewer >= all_pairs) return 1;
 
+    // Ghost Overrides: "off" drops just that one ghost; its surfaces' other
+    // ghosts stay.
+    fsp_set_surfaces(pv, nullptr, 0);
+    char text[64];
+    std::snprintf(text, sizeof(text), "# picked\n%d-%d off\nnot a ghost", pa[0], pb[0]);
+    if (fsp_set_ghost_overrides(pv, text, 1920.0f) != 1) { std::fprintf(stderr, "bad line not counted\n"); return 1; }
+    if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+    const int one_off = fsp_num_pairs(pv);
+    const int picked3 = fsp_pick_ghosts(pv, &p, w, h, (float)(best % w) + 0.5f,
+                                        (float)(best / w) + 0.5f, pa2, pb2, share2, 8);
+    for (int i = 0; i < picked3; ++i)
+        if (pa2[i] == pa[0] && pb2[i] == pb[0]) { std::fprintf(stderr, "ghost turned off still picked\n"); return 1; }
+    std::printf("ghost %d + %d off: %d of %d ghosts left\n", pa[0], pb[0], one_off, all_pairs);
+    if (one_off != all_pairs - 1) return 1;
+    // A gain on the picked ghost brightens the picked pixel.
+    if (fsp_set_ghost_overrides(pv, "", 1920.0f) != 0) return 1;
+    if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+    const unsigned char* bp = &rgba[(size_t)best * 4];
+    const int before = bp[0] + bp[1] + bp[2];
+    std::snprintf(text, sizeof(text), "%d-%d gain=0.25", pb[0], pa[0]);
+    fsp_set_ghost_overrides(pv, text, 1920.0f);
+    if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+    const int after = bp[0] + bp[1] + bp[2];
+    std::printf("ghost gain 0.25: picked pixel %d -> %d\n", before, after);
+    if (fsp_num_pairs(pv) != all_pairs || after >= before) return 1;
+    fsp_set_ghost_overrides(pv, nullptr, 0.0f);
+
     FspSurfaceInfo info;
     if (fsp_surface_info(pv, 0, &info) != 0 || info.semi_aperture <= 0.0f) return 1;
     if (fsp_surface_info(pv, surfaces, &info) != -1) return 1;
