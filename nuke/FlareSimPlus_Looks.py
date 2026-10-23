@@ -75,6 +75,8 @@ USER_LENS_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'lens
 # threshold, camera/FOV, seeds) are deliberately left out.
 LOOK_KNOBS = (
     'flare_gain',
+    'res_independent',
+    'res_ref_width',
     'pupil_jitter',
     'aperture_blades',
     'aperture_rotation',
@@ -91,9 +93,14 @@ LOOK_KNOBS = (
     'haze_gain',
     'haze_radius',
     'haze_passes',
+    'haze_shape',
+    'haze_tint',
     'starburst_enable',
     'starburst_gain',
     'starburst_scale',
+    'starburst_tint',
+    'starburst_fringe',
+    'starburst_softness',
     'dirt_gain',
     'dirt_spread',
     'dirt_softness',
@@ -105,6 +112,17 @@ LOOK_KNOBS = (
 # them; applying a look leaves the node's Quality alone.
 SKIPPED_KNOBS = ('ray_grid', 'viewer_quality', 'render_full')
 
+# Knobs added after looks were first saved, with their defaults.  A look
+# that doesn't list one puts it back to the default, so an older look still
+# looks the way it did when it was saved.
+LATER_KNOB_DEFAULTS = {
+    'haze_shape': 0.0,
+    'haze_tint': [1.0, 1.0, 1.0],
+    'starburst_tint': [1.0, 1.0, 1.0],
+    'starburst_fringe': 1.0,
+    'starburst_softness': 0.0,
+}
+
 # Per-surface override knobs (Surfaces tab) and their defaults.
 MAX_SURFS = 50
 SURF_KNOBS = (
@@ -115,6 +133,101 @@ SURF_KNOBS = (
     ('surf_offy_%d', 0.0),
     ('surf_scale_%d', 1.0),
 )
+
+# Settings for single ghosts (Surfaces tab > Ghost Overrides), as text.
+GHOST_KNOB = 'ghost_overrides'
+GHOST_DEFAULT = {'on': True, 'gain': 1.0, 'color': (1.0, 1.0, 1.0),
+                 'scale': 1.0, 'offx': 0.0, 'offy': 0.0}
+
+
+def _ghost_floats(text, count):
+    parts = text.split(',')
+    if not 1 <= len(parts) <= count:
+        return None
+    try:
+        values = [float(p) for p in parts]
+    except ValueError:
+        return None
+    return values if all(v == v for v in values) else None
+
+
+def parse_ghost_overrides(text):
+    """{(a, b): settings} from Ghost Overrides text (the rules of the
+    node's ghost_overrides.h).  Lines that can't be read are skipped."""
+    ghosts = {}
+    for line in (text or '').replace(';', '\n').splitlines():
+        words = line.split()
+        if not words or words[0].startswith('#'):
+            continue
+        name = words[0]
+        sep = next((i for i, ch in enumerate(name) if ch in '-+/'), -1)
+        try:
+            a, b = int(name[:sep]), int(name[sep + 1:])
+        except ValueError:
+            continue
+        if sep <= 0 or a < 0 or b < 0 or a == b:
+            continue
+        g = dict(GHOST_DEFAULT)
+        ok = True
+        for word in (w.lower() for w in words[1:]):
+            key, eq, val = word.partition('=')
+            if not eq:
+                if word in ('on', 'off'):
+                    g['on'] = word == 'on'
+                else:
+                    ok = False
+                continue
+            v = _ghost_floats(val, 3 if key in ('color', 'colour', 'tint') else
+                              2 if key == 'offset' else 1)
+            if v is None:
+                ok = False
+            elif key == 'gain' and len(v) == 1 and v[0] >= 0.0:
+                g['gain'] = v[0]
+            elif key in ('color', 'colour', 'tint') and len(v) in (1, 3):
+                g['color'] = tuple(max(c, 0.0) for c in (v * 3 if len(v) == 1 else v))
+            elif key == 'scale' and len(v) == 1 and v[0] > 0.0:
+                g['scale'] = v[0]
+            elif key == 'offset' and len(v) == 2:
+                g['offx'], g['offy'] = v
+            else:
+                ok = False
+        if ok:
+            ghosts[(min(a, b), max(a, b))] = g
+    return ghosts
+
+
+def ghost_changed(g):
+    """True when a ghost's settings differ from the defaults."""
+    return (not g['on'] or abs(g['gain'] - 1.0) > 1e-6 or abs(g['scale'] - 1.0) > 1e-6
+            or abs(g['offx']) > 1e-6 or abs(g['offy']) > 1e-6
+            or any(abs(c - 1.0) > 1e-6 for c in g['color']))
+
+
+def _num(v):
+    return ('%.4f' % v).rstrip('0').rstrip('.') or '0'
+
+
+def format_ghost_overrides(ghosts):
+    """Ghost Overrides text for {(a, b): settings}, one ghost per line,
+    leaving out ghosts and settings at their defaults."""
+    lines = []
+    for (a, b) in sorted(ghosts):
+        g = ghosts[(a, b)]
+        if not ghost_changed(g):
+            continue
+        words = ['%d-%d' % (a, b)]
+        if abs(g['gain'] - 1.0) > 1e-6:
+            words.append('gain=' + _num(g['gain']))
+        if any(abs(c - 1.0) > 1e-6 for c in g['color']):
+            words.append('color=' + ','.join(_num(c) for c in g['color']))
+        if abs(g['scale'] - 1.0) > 1e-6:
+            words.append('scale=' + _num(g['scale']))
+        if abs(g['offx']) > 1e-6 or abs(g['offy']) > 1e-6:
+            words.append('offset=%s,%s' % (_num(g['offx']), _num(g['offy'])))
+        if not g['on']:
+            words.append('off')
+        lines.append(' '.join(words))
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +243,8 @@ def _knob_value(knob):
         return bool(knob.value())
     if cls == 'Int_Knob':
         return int(knob.value())
+    if 'String' in cls:
+        return str(knob.value())
     size = knob.arraySize() if hasattr(knob, 'arraySize') else 1
     if size > 1:
         return [float(knob.getValue(i)) for i in range(size)]
@@ -157,6 +272,8 @@ def _same(a, b):
         return all(abs(float(x) - float(y)) < 1e-6 for x, y in zip(a, b))
     if isinstance(a, bool) or isinstance(b, bool):
         return bool(a) == bool(b)
+    if isinstance(a, str) or isinstance(b, str):
+        return str(a).strip() == str(b).strip()
     return abs(float(a) - float(b)) < 1e-6
 
 
@@ -367,6 +484,10 @@ def capture_look(node, name, description=''):
                 value = _knob_value(knobs[k])
                 if not _same(value, default):
                     look['knobs'][k] = value
+    if GHOST_KNOB in knobs:
+        text = str(knobs[GHOST_KNOB].value()).strip()
+        if text:
+            look['knobs'][GHOST_KNOB] = text
     return look
 
 
@@ -446,6 +567,11 @@ def apply_look(look, nodes, reset_surfaces=True):
                     k = pattern % i
                     if k in knobs:
                         _set_knob_value(knobs[k], default)
+            if reset_surfaces and GHOST_KNOB in knobs:
+                knobs[GHOST_KNOB].setValue('')
+            for k, default in LATER_KNOB_DEFAULTS.items():
+                if k in knobs and k not in values:
+                    _set_knob_value(knobs[k], default)
             for k, v in values.items():
                 if k in knobs and k not in SKIPPED_KNOBS:
                     _set_knob_value(knobs[k], v)

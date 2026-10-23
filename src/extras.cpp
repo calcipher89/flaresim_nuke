@@ -197,6 +197,8 @@ void starburst_psf(int blades, float rotation_deg, int n, std::vector<float>& ou
 void FlareExtras::clear()
 {
     haze_.clear();
+    haze_core_[0].clear();
+    haze_core_[1].clear();
     dirt_.clear();
     scatter_.clear();
     for (int c = 0; c < 3; ++c) dirt_img_[c].clear();
@@ -210,9 +212,22 @@ void FlareExtras::compute(const ExtrasConfig& cfg, const ExtrasFrame& frame,
 {
     clear();
     if (lights.empty() || frame.buf_w <= 0 || frame.buf_h <= 0) return;
-    if (cfg.haze_gain > 0.0f)
-        haze_.compute(cfg.haze_gain, cfg.haze_radius, cfg.haze_passes,
-                      kRefRadius, kRefPeak, frame, lights);
+    if (cfg.haze_gain > 0.0f) {
+        // Haze Shape moves light from the main glow into glows a third and
+        // a ninth as wide, energy shared 9 : 3 : 1 at Shape 1, so each
+        // tighter glow is brighter at its centre: together they fall off
+        // about as 1/distance from the light out to Haze Radius.
+        const float s = std::clamp(cfg.haze_shape, 0.0f, 1.0f);
+        const float share[3] = { 1.0f - s * 4.0f / 13.0f, s * 3.0f / 13.0f, s * 1.0f / 13.0f };
+        const float radius[3] = { cfg.haze_radius, cfg.haze_radius / 3.0f, cfg.haze_radius / 9.0f };
+        GlowField* field[3] = { &haze_, &haze_core_[0], &haze_core_[1] };
+        for (int i = 0; i < 3; ++i) {
+            if (share[i] <= 0.0f) continue;
+            field[i]->compute(cfg.haze_gain * share[i], radius[i], cfg.haze_passes,
+                              kRefRadius, kRefPeak, frame, lights);
+            field[i]->tint(cfg.haze_tint);
+        }
+    }
     if (cfg.dirt_gain > 0.0f)
         dirt_.compute(cfg.dirt_gain, cfg.dirt_spread, 3,
                       kDirtRefRadius, kDirtRefPeak, frame, lights);
@@ -284,6 +299,15 @@ void GlowField::compute(float gain, float radius, int passes_in, float ref_radiu
         for (float& v : ch[c]) v *= norm;
 
     w = lw;  h = lh;  ds = lds;  pad = lpad;
+}
+
+void GlowField::tint(const float rgb[3])
+{
+    for (int c = 0; c < 3; ++c) {
+        const float k = std::max(rgb[c], 0.0f);
+        if (k != 1.0f)
+            for (float& v : ch[c]) v *= k;
+    }
 }
 
 void GlowField::add_row(int c, int y, int x0, int x1, float* dst) const
@@ -429,12 +453,21 @@ const float* FlareExtras::dirt_row(int c, int y) const
 void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& f,
                                     const std::vector<BrightPixel>& lights)
 {
+    const float softness = std::clamp(cfg.starburst_softness, 0.0f, 0.5f);
     if (psf_.empty() || psf_blades_ != cfg.aperture_blades
-            || psf_rotation_ != cfg.aperture_rotation) {
+            || psf_rotation_ != cfg.aperture_rotation || psf_softness_ != softness) {
         starburst_psf(cfg.aperture_blades, cfg.aperture_rotation, kPsfSize, psf_);
         psf_n_ = kPsfSize;
         psf_blades_ = cfg.aperture_blades;
         psf_rotation_ = cfg.aperture_rotation;
+        psf_softness_ = softness;
+        // Starburst Softness: blur the pattern (the spikes reach half its
+        // width), keeping its light, so soft spikes are wider and fainter.
+        const int r = (int)std::lround(softness * kPsfSize * 0.5f);
+        if (r > 0) {
+            std::vector<float> tmp;
+            box_blur_inplace(psf_.data(), kPsfSize, kPsfSize, r, 3, tmp, /*zero_edges=*/true);
+        }
     }
 
     // Spikes cost a lot per light; the brightest lights get them.
@@ -456,11 +489,16 @@ void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& 
     const float r_ref = std::max(cfg.starburst_scale, 1e-4f) * diag;
     const int   n = psf_n_;
     const float half_n = n * 0.5f;
-    const float scale_ch[3] = { 650.0f / 550.0f, 1.0f, 450.0f / 550.0f };
+    // Red spreads wider than blue (by wavelength), as much as Starburst
+    // Fringe asks.
+    const float fringe = std::max(cfg.starburst_fringe, 0.0f);
+    const float scale_ch[3] = { 1.0f + fringe * (650.0f / 550.0f - 1.0f), 1.0f,
+                                std::max(1.0f + fringe * (450.0f / 550.0f - 1.0f), 0.05f) };
+    const float r_max_scale = std::max({ scale_ch[0], scale_ch[1], scale_ch[2] });
     const float* psf = psf_.data();
 
     for (const LightPos& p : pos) {
-        const float r_max = r_ref * scale_ch[0];
+        const float r_max = r_ref * r_max_scale;
         const int ox0 = std::max(0, (int)std::floor(p.x - r_max));
         const int ox1 = std::min(w, (int)std::ceil(p.x + r_max) + 1);
         const int oy0 = std::max(0, (int)std::floor(p.y - r_max));
@@ -468,7 +506,8 @@ void FlareExtras::compute_starburst(const ExtrasConfig& cfg, const ExtrasFrame& 
         if (ox0 >= ox1 || oy0 >= oy1) continue;
         const float rgb[3] = { p.r, p.g, p.b };
         for (int c = 0; c < 3; ++c) {
-            const float v = rgb[c] * cfg.starburst_gain * kStarburstUnit;
+            const float v = rgb[c] * cfg.starburst_gain * kStarburstUnit
+                          * std::max(cfg.starburst_tint[c], 0.0f);
             if (v <= 0.0f) continue;
             const float inv_r = half_n / (r_ref * scale_ch[c]);
             float* o = star_[c].data();

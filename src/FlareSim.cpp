@@ -26,6 +26,7 @@
 #include "occlusion.h"
 #include "node_ui.h"
 #include "ghost.h"
+#include "ghost_overrides.h"
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
 #include "extras.h"
@@ -250,6 +251,14 @@ public:
     const char* lens_file_;
     float       source_intensity_; // HDR boost for sampled source (default 8, internal ×1000)
     float       flare_gain_;       // artistic ghost multiplier (default 10, internal ×1000)
+    bool        res_independent_;  // Resolution Independent
+    float       res_ref_width_;    // ... at this format width
+    // Resolution Independent: format width / Reference Width, else 1.
+    float res_scale() const
+    {
+        return (res_independent_ && pending_fmt_w_ > 0)
+            ? (float)pending_fmt_w_ / std::max(res_ref_width_, 1.0f) : 1.0f;
+    }
     int         ray_grid_;                 // used when Quality is Custom
     int         quality_;                  // flaresim::Quality
     int         ghost_render_;             // flaresim::GhostRender
@@ -286,9 +295,14 @@ public:
     float       haze_gain_;
     float       haze_radius_;
     int         haze_passes_;
+    float       haze_shape_;
+    float       haze_tint_[3];
     bool        starburst_enable_;
     float       starburst_gain_;
     float       starburst_scale_;
+    float       starburst_tint_[3];
+    float       starburst_fringe_;
+    float       starburst_softness_;
     bool        dirt_enable_;              // Lens Dirt
     float       dirt_gain_;
     float       dirt_spread_;
@@ -361,6 +375,8 @@ public:
     float       surf_scale_[MAX_SURFS_UI];     // scale per surface (1.0 = default)
     // Per-instance labels for surface knobs (stable pointers for Knob API)
     char        surf_labels_[MAX_SURFS_UI][64];
+    // Ghost Overrides text: settings for single ghosts (ghost_overrides.h).
+    const char* ghost_overrides_;
 
     // Name of the look last applied from the Lens Browser, for the header.
     std::string look_name_;
@@ -431,8 +447,11 @@ public:
     explicit FlareSim(Node* node)
         : Iop(node)
         , lens_file_("")
+        , ghost_overrides_("")
         , source_intensity_(8.0f)
         , flare_gain_(10.0f)
+        , res_independent_(false)
+        , res_ref_width_(1920.0f)
         , ray_grid_(flaresim::kDefaultRayGrid)
         , quality_(flaresim::kQualityMedium)
         , ghost_render_(flaresim::kRenderPoints)
@@ -460,9 +479,12 @@ public:
         , haze_gain_(0.1f)
         , haze_radius_(0.15f)
         , haze_passes_(3)
+        , haze_shape_(0.0f)
         , starburst_enable_(false)
         , starburst_gain_(100.0f)
         , starburst_scale_(0.15f)
+        , starburst_fringe_(1.0f)
+        , starburst_softness_(0.0f)
         , dirt_enable_(false)
         , dirt_gain_(1.0f)
         , dirt_spread_(0.4f)
@@ -498,6 +520,7 @@ public:
         manual_xy_[0] = 960.0;  // sensible default (centre of 1920 frame)
         manual_xy_[1] = 540.0;
         light_color_[0] = light_color_[1] = light_color_[2] = 1.0f;
+        for (int c = 0; c < 3; ++c) haze_tint_[c] = starburst_tint_[c] = 1.0f;
         color_from_plate_ = false;
         outside_source_color_[0] = 1.0f;
         outside_source_color_[1] = 1.0f;
@@ -850,6 +873,23 @@ public:
         SetRange(f, 0.0, 50.0);
         Tooltip(f, "Ghost intensity multiplier.\n\n"
                    "Controls overall ghost brightness.  Typical range 1–20.  Default 10.");
+        Bool_knob(f, &res_independent_, "res_independent", "Resolution Independent");
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "The flare looks the same at any resolution: a look tuned "
+                   "on a 2K plate matches on the same plate at 4K.\n"
+                   "Without it, Manual XY ghosts get fainter at higher "
+                   "resolutions (the same light is spread over more pixels), "
+                   "while Auto Detect haze, starburst and lens dirt get "
+                   "brighter (a light covers more detection blocks).  On, "
+                   "they are scaled to look the way they do at Reference "
+                   "Width, and Surface and Ghost Override offsets are in "
+                   "Reference Width pixels.  Off by default, so older "
+                   "scripts render as before.");
+        adv_.add(f, Float_knob(f, &res_ref_width_, "res_ref_width", "Reference Width"));
+        SetRange(f, 640.0, 8192.0);
+        Tooltip(f, "With Resolution Independent on: the format width the "
+                   "flare is matched at.  1920 (the default) for looks tuned "
+                   "on HD plates.");
 
         static const char* const kJitterModes[] = {
             "Off", "Stratified", "Halton", nullptr
@@ -986,6 +1026,17 @@ public:
         SetRange(f, 1, 6);
         Tooltip(f, "Box-blur passes.  3 approximates a Gaussian; more gives "
                    "a softer core.");
+        adv_.add(f, Float_knob(f, &haze_shape_, "haze_shape", "Haze Shape"));
+        SetRange(f, 0.0, 1.0);
+        Tooltip(f, "How the haze falls off.  0 = one soft, even glow of Haze "
+                   "Radius.  Towards 1, more of the haze gathers close to the "
+                   "light and fades out gradually, like the veiling glare of "
+                   "a real lens (bright near the light, a long faint tail).  "
+                   "The total haze stays about the same (a little more stays "
+                   "in frame).");
+        adv_.add(f, Color_knob(f, haze_tint_, "haze_tint", "Haze Tint"));
+        Tooltip(f, "Colours the haze, on top of the light's own colour.  "
+                   "Coated lenses often give a warm or a cool veil.");
 
         Divider(f, "Starburst");
         Bool_knob(f, &starburst_enable_, "starburst_enable", "Starburst");
@@ -1004,6 +1055,18 @@ public:
         adv_.add(f, Float_knob(f, &starburst_scale_, "starburst_scale", "Starburst Size"));
         SetRange(f, 0.01, 0.5);
         Tooltip(f, "Length of the spikes, as a fraction of the image diagonal.");
+        adv_.add(f, Color_knob(f, starburst_tint_, "starburst_tint", "Starburst Tint"));
+        Tooltip(f, "Colours the spikes, on top of the light's own colour.");
+        adv_.add(f, Float_knob(f, &starburst_fringe_, "starburst_fringe", "Starburst Fringe"));
+        SetRange(f, 0.0, 2.0);
+        Tooltip(f, "Colour fringing along the spikes.  1 = as in a real lens "
+                   "(red spreads wider than blue).  0 = the same in every "
+                   "colour, no fringes.  Above 1 exaggerates the rainbow.");
+        adv_.add(f, Float_knob(f, &starburst_softness_, "starburst_softness", "Starburst Softness"));
+        SetRange(f, 0.0, 0.05);
+        Tooltip(f, "Softens and widens the spikes (a blur, as a fraction of "
+                   "their length).  0 = crisp; 0.005 to 0.02 for the softer "
+                   "spikes of an older or hazier lens.");
 
         Divider(f, "Lens Dirt");
         Bool_knob(f, &dirt_enable_, "dirt_enable", "Lens Dirt");
@@ -1077,6 +1140,17 @@ public:
         Button(f, "surf_select_all",   "Select All");
         Button(f, "surf_deselect_all", "Deselect All");
         Button(f, "surf_reset_gains",  "Reset Gains");
+        Multiline_String_knob(f, &ghost_overrides_, "ghost_overrides", "Ghost Overrides", 4);
+        SetFlags(f, Knob::STARTLINE);
+        Tooltip(f, "Settings for single ghosts, on top of their two surfaces' "
+                   "settings below.  The Lens Browser writes these when you "
+                   "pick a ghost and change it; you can also type them.  One "
+                   "ghost per line, named by its two surfaces:\n"
+                   "  3-12 gain=2.5 color=1,0.6,0.9 scale=0.8 offset=10,-5\n"
+                   "  4-9 off\n"
+                   "gain and color multiply, scale grows the ghost about the "
+                   "frame centre, offset shifts it in pixels (+y up), off "
+                   "leaves it out.  Lines that can't be read are skipped.");
         for (int k = 0; k < MAX_SURFS_UI; ++k)
         {
             Bool_knob(f, &surf_enabled_[k], s_surf_knob_names.toggle_names[k], surf_labels_[k]);
@@ -1139,9 +1213,11 @@ public:
             const bool over = (clip_to_ == flaresim::kClipOverscan);
             if (Knob* x = knob("overscan_w")) x->enable(over);
             if (Knob* x = knob("overscan_h")) x->enable(over);
-            for (const char* name : { "haze_gain", "haze_radius", "haze_passes" })
+            if (Knob* x = knob("res_ref_width")) x->enable(res_independent_);
+            for (const char* name : { "haze_gain", "haze_radius", "haze_passes", "haze_shape", "haze_tint" })
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
-            for (const char* name : { "starburst_gain", "starburst_scale" })
+            for (const char* name : { "starburst_gain", "starburst_scale", "starburst_tint",
+                                      "starburst_fringe", "starburst_softness" })
                 if (Knob* x = knob(name)) x->enable(starburst_enable_);
             for (const char* name : { "dirt_gain", "dirt_spread", "dirt_softness",
                                       "dirt_scatter", "dirt_ghosts" })
@@ -1159,6 +1235,7 @@ public:
         }
         if (k->is("show_advanced") || k->is("clip_to") ||
             k->is("haze_enable") || k->is("starburst_enable") ||
+            k->is("res_independent") ||
             k->is("dirt_enable")) {
             sync_simple_ui();
             return 1;
@@ -1497,6 +1574,9 @@ public:
         const float fmt_cy = pending_fmt_y0_ + pending_fmt_h_ * 0.5f;
 
         std::vector<BrightPixel> sources;
+        // Resolution Independent, Auto Detect: the light the lights found
+        // at Reference Width would carry, over the light found here.
+        float auto_light_ratio = 1.0f;
 
         if (source_mode_ == 0)
         {
@@ -1714,6 +1794,15 @@ public:
 
             // Cap total sources — keep the brightest.
             const int cap = std::max(max_sources_, 1);
+            // At k times Reference Width the plate has k^2 times the blocks,
+            // so k^2 times the lights, up to the cap.  (The brighter part of
+            // a light smaller than a block is in its brighter average.)
+            if (!sources.empty()) {
+                const float k2 = res_scale() * res_scale();
+                const float n_raw = (float)sources.size();
+                auto_light_ratio = std::min(n_raw / k2, (float)cap)
+                                 / std::min(n_raw, (float)cap);
+            }
             if ((int)sources.size() > cap) {
                 std::sort(sources.begin(), sources.end(),
                           [](const BrightPixel& a, const BrightPixel& b) {
@@ -1765,7 +1854,23 @@ public:
             xc.haze_passes       = haze_passes_;
             xc.starburst_gain    = starburst_enable_ ? starburst_gain_ : 0.0f;
             xc.starburst_scale   = starburst_scale_;
+            xc.starburst_fringe   = starburst_fringe_;
+            xc.starburst_softness = starburst_softness_;
+            xc.haze_shape         = haze_shape_;
+            for (int c = 0; c < 3; ++c) {
+                xc.haze_tint[c]      = haze_tint_[c];
+                xc.starburst_tint[c] = starburst_tint_[c];
+            }
             xc.dirt_gain         = dirt_input() ? dirt_gain_ : 0.0f;
+            // Resolution Independent: in Auto Detect each light found has
+            // its own glow, so scale by the light found at Reference Width.
+            if (source_mode_ == 1) {
+                xc.haze_gain *= auto_light_ratio;  xc.dirt_gain *= auto_light_ratio;
+                // Only the brightest lights get spikes, so count the spikes drawn.
+                const float n = (float)sources.size(), cap = (float)std::max(xc.max_starbursts, 1);
+                if (n > 0.0f)
+                    xc.starburst_gain *= std::min(n * auto_light_ratio, cap) / std::min(n, cap);
+            }
             xc.dirt_spread       = dirt_spread_;
             xc.aperture_blades   = aperture_blades_;
             xc.aperture_rotation = aperture_rotation_;
@@ -1826,6 +1931,10 @@ public:
                                                      pending_fmt_w_);
         cfg.ghost_render          = ghost_render_;
         cfg.gain                  = flare_gain_ * 1000.0f;
+        // Resolution Independent: each light spreads the same ghost
+        // energy over k^2 times the pixels, so it is k^2 brighter.  Auto
+        // Detect may also have found more light than at Reference Width.
+        cfg.gain *= res_scale() * res_scale() * (source_mode_ == 1 ? auto_light_ratio : 1.0f);
         cfg.aperture_blades       = aperture_blades_;
         cfg.aperture_rotation_deg = aperture_rotation_;
         static const int kSpecCounts[] = {3, 5, 7, 9, 11, 15, 21, 31};
@@ -1885,6 +1994,10 @@ public:
             enabled_offsets.reserve(active_pairs.size() * 2);
             enabled_scales.reserve(active_pairs.size());
 
+            // Ghost Overrides: single ghosts, on top of their surfaces.
+            const std::vector<flaresim::GhostOverride> overrides =
+                flaresim::parse_ghost_overrides(ghost_overrides_ ? ghost_overrides_ : "");
+
             for (int i = 0; i < (int)active_pairs.size(); ++i)
             {
                 const int sa = active_pairs[i].surf_a;
@@ -1895,13 +2008,16 @@ public:
                 const bool b_on = (sb < 0 || sb >= MAX_SURFS_UI) || surf_enabled_[sb];
                 if (!a_on || !b_on)
                     continue;
+                const flaresim::GhostOverride* go = flaresim::find_ghost_override(overrides, sa, sb);
+                if (go && (!go->on || go->gain <= 0.0f))
+                    continue;
 
                 // Multiply area boost by the gain of both surfaces
                 float gain_a = (sa >= 0 && sa < MAX_SURFS_UI) ? surf_gain_[sa] : 1.0f;
                 float gain_b = (sb >= 0 && sb < MAX_SURFS_UI) ? surf_gain_[sb] : 1.0f;
 
                 enabled_pairs.push_back(active_pairs[i]);
-                enabled_boosts.push_back(area_boosts[i] * gain_a * gain_b);
+                enabled_boosts.push_back(area_boosts[i] * gain_a * gain_b * (go ? go->gain : 1.0f));
 
                 // Per-pair color: multiply both surfaces' tints
                 float cr = 1.0f, cg = 1.0f, cb = 1.0f;
@@ -1911,6 +2027,7 @@ public:
                 if (sb >= 0 && sb < MAX_SURFS_UI) {
                     cr *= surf_color_[sb][0]; cg *= surf_color_[sb][1]; cb *= surf_color_[sb][2];
                 }
+                if (go) { cr *= go->col[0]; cg *= go->col[1]; cb *= go->col[2]; }
                 enabled_colors.push_back(cr);
                 enabled_colors.push_back(cg);
                 enabled_colors.push_back(cb);
@@ -1919,6 +2036,8 @@ public:
                 float ox = 0.0f, oy = 0.0f;
                 if (sa >= 0 && sa < MAX_SURFS_UI) { ox += surf_offx_[sa]; oy += surf_offy_[sa]; }
                 if (sb >= 0 && sb < MAX_SURFS_UI) { ox += surf_offx_[sb]; oy += surf_offy_[sb]; }
+                if (go) { ox += go->ox; oy += go->oy; }
+                ox *= res_scale();  oy *= res_scale();
                 enabled_offsets.push_back(ox);
                 enabled_offsets.push_back(oy);
 
@@ -1926,6 +2045,7 @@ public:
                 float sc = 1.0f;
                 if (sa >= 0 && sa < MAX_SURFS_UI) sc *= surf_scale_[sa];
                 if (sb >= 0 && sb < MAX_SURFS_UI) sc *= surf_scale_[sb];
+                if (go) sc *= go->scale;
                 enabled_scales.push_back(sc);
             }
             active_pairs = std::move(enabled_pairs);

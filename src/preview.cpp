@@ -12,6 +12,7 @@
 
 #include "lens.h"
 #include "ghost.h"
+#include "ghost_overrides.h"
 #include "trace.h"
 
 #include <algorithm>
@@ -122,6 +123,8 @@ struct Preview
     float                  pairs_shh = -1.0f;
 
     std::vector<FspSurface> surfs;        // per-surface settings, may be short
+    std::vector<flaresim::GhostOverride> ghosts;  // single-ghost settings
+    float                   ghosts_ref_w = 1920.0f;  // their offsets' pixels
     int                     hl_a = -1, hl_b = -1;   // highlighted ghost(s)
     int                     enabled_pairs = 0;      // pairs drawn by the last render
 
@@ -237,6 +240,16 @@ PairStyle pair_style(const Preview& pv, const GhostPair& pair)
         st.ox    += f.offset_x;
         st.oy    += f.offset_y;
         st.scale *= f.scale;
+    }
+    if (const flaresim::GhostOverride* g =
+            flaresim::find_ghost_override(pv.ghosts, pair.surf_a, pair.surf_b))
+    {
+        st.on     = st.on && g->on;
+        st.gain  *= g->gain;
+        for (int c = 0; c < 3; ++c) st.col[c] *= g->col[c];
+        st.ox    += g->ox / pv.ghosts_ref_w;
+        st.oy    += g->oy / pv.ghosts_ref_w;
+        st.scale *= g->scale;
     }
     return st;
 }
@@ -604,6 +617,15 @@ FSP_API void fsp_set_surfaces(void* handle, const FspSurface* surfaces, int n)
 {
     Preview& pv = *static_cast<Preview*>(handle);
     pv.surfs.assign(surfaces, surfaces + std::max(0, surfaces ? n : 0));
+}
+
+FSP_API int fsp_set_ghost_overrides(void* handle, const char* text, float ref_width)
+{
+    Preview& pv = *static_cast<Preview*>(handle);
+    int bad = 0;
+    pv.ghosts = flaresim::parse_ghost_overrides(text ? text : "", &bad);
+    pv.ghosts_ref_w = ref_width > 0.0f ? ref_width : 1920.0f;
+    return bad;
 }
 
 FSP_API void fsp_set_highlight(void* handle, int surf_a, int surf_b)
