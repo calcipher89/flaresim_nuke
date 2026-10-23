@@ -1032,7 +1032,8 @@ public:
                    "Radius.  Towards 1, more of the haze gathers close to the "
                    "light and fades out gradually, like the veiling glare of "
                    "a real lens (bright near the light, a long faint tail).  "
-                   "The total haze stays the same.");
+                   "The total haze stays about the same (a little more stays "
+                   "in frame).");
         adv_.add(f, Color_knob(f, haze_tint_, "haze_tint", "Haze Tint"));
         Tooltip(f, "Colours the haze, on top of the light's own colour.  "
                    "Coated lenses often give a warm or a cool veil.");
@@ -1573,6 +1574,9 @@ public:
         const float fmt_cy = pending_fmt_y0_ + pending_fmt_h_ * 0.5f;
 
         std::vector<BrightPixel> sources;
+        // Resolution Independent, Auto Detect: the light the lights found
+        // at Reference Width would carry, over the light found here.
+        float auto_light_ratio = 1.0f;
 
         if (source_mode_ == 0)
         {
@@ -1790,6 +1794,15 @@ public:
 
             // Cap total sources — keep the brightest.
             const int cap = std::max(max_sources_, 1);
+            // At k times Reference Width the plate has k^2 times the blocks,
+            // so k^2 times the lights, up to the cap.  (The brighter part of
+            // a light smaller than a block is in its brighter average.)
+            if (!sources.empty()) {
+                const float k2 = res_scale() * res_scale();
+                const float n_raw = (float)sources.size();
+                auto_light_ratio = std::min(n_raw / k2, (float)cap)
+                                 / std::min(n_raw, (float)cap);
+            }
             if ((int)sources.size() > cap) {
                 std::sort(sources.begin(), sources.end(),
                           [](const BrightPixel& a, const BrightPixel& b) {
@@ -1849,15 +1862,14 @@ public:
                 xc.starburst_tint[c] = starburst_tint_[c];
             }
             xc.dirt_gain         = dirt_input() ? dirt_gain_ : 0.0f;
-            // Resolution Independent: Auto Detect finds k^2 times the
-            // lights (blocks) at k times the width, each with its own glow.
+            // Resolution Independent: in Auto Detect each light found has
+            // its own glow, so scale by the light found at Reference Width.
             if (source_mode_ == 1) {
-                const float inv_k2 = 1.0f / (res_scale() * res_scale());
-                xc.haze_gain *= inv_k2;  xc.dirt_gain *= inv_k2;
+                xc.haze_gain *= auto_light_ratio;  xc.dirt_gain *= auto_light_ratio;
                 // Only the brightest lights get spikes, so count the spikes drawn.
                 const float n = (float)sources.size(), cap = (float)std::max(xc.max_starbursts, 1);
                 if (n > 0.0f)
-                    xc.starburst_gain *= std::min(std::max(n * inv_k2, 1.0f), cap) / std::min(n, cap);
+                    xc.starburst_gain *= std::min(n * auto_light_ratio, cap) / std::min(n, cap);
             }
             xc.dirt_spread       = dirt_spread_;
             xc.aperture_blades   = aperture_blades_;
@@ -1919,10 +1931,10 @@ public:
                                                      pending_fmt_w_);
         cfg.ghost_render          = ghost_render_;
         cfg.gain                  = flare_gain_ * 1000.0f;
-        // Resolution Independent: one placed light spreads the same
-        // ghost energy over k^2 times the pixels, so it is k^2 brighter.
-        // Auto Detect already has k^2 times the lights.
-        if (source_mode_ != 1) cfg.gain *= res_scale() * res_scale();
+        // Resolution Independent: each light spreads the same ghost
+        // energy over k^2 times the pixels, so it is k^2 brighter.  Auto
+        // Detect may also have found more light than at Reference Width.
+        cfg.gain *= res_scale() * res_scale() * (source_mode_ == 1 ? auto_light_ratio : 1.0f);
         cfg.aperture_blades       = aperture_blades_;
         cfg.aperture_rotation_deg = aperture_rotation_;
         static const int kSpecCounts[] = {3, 5, 7, 9, 11, 15, 21, 31};

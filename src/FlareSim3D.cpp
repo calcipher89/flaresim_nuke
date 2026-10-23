@@ -731,7 +731,8 @@ public:
                    "Radius.  Towards 1, more of the haze gathers close to the "
                    "light and fades out gradually, like the veiling glare of "
                    "a real lens (bright near the light, a long faint tail).  "
-                   "The total haze stays the same.");
+                   "The total haze stays about the same (a little more stays "
+                   "in frame).");
         adv_.add(f, Color_knob(f, haze_tint_, "haze_tint", "Haze Tint"));
         Tooltip(f, "Colours the haze, on top of the light's own colour.  "
                    "Coated lenses often give a warm or a cool veil.");
