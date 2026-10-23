@@ -328,6 +328,40 @@ int main()
         printf("PASS: flat (radius=0) shortcut works for non-spherical type\n");
     }
 
+    // ===================================================================
+    // 7. Anamorphic squeeze from the paraxial focal lengths.
+    // ===================================================================
+    {
+        // Spherical singlet: same focal length both ways, squeeze 1.
+        LensSystem sph;
+        sph.surfaces = { make_surface(SURF_SPHERICAL, 50.0f, 0.0f),
+                         make_surface(SURF_SPHERICAL, -50.0f, 5.0f) };
+        sph.surfaces[0].ior = 1.5f;  sph.surfaces[0].thickness = 5.0f;
+        sph.surfaces[1].ior = 1.0f;  sph.surfaces[1].thickness = 50.0f;
+        sph.compute_geometry();
+        assert(approx(sph.squeeze, 1.0f, 1e-6f));
+
+        // Galilean cyl_y afocal block (F -50 then +100, gap 50) in front of
+        // a thin 50 mm lens: 2x squeeze, vertical focal length unchanged.
+        LensSystem ana;
+        Surface c1 = make_surface(SURF_CYLINDER_Y, -25.0f, 0.0f);  c1.ior = 1.5f; c1.thickness = 0.001f;
+        Surface f1 = make_surface(SURF_SPHERICAL, 0.0f, 0.0f);      f1.ior = 1.0f; f1.thickness = 50.0f;
+        Surface f2 = make_surface(SURF_SPHERICAL, 0.0f, 0.0f);      f2.ior = 1.5f; f2.thickness = 0.001f;
+        Surface c2 = make_surface(SURF_CYLINDER_Y, -50.0f, 0.0f);  c2.ior = 1.0f; c2.thickness = 1.0f;
+        Surface t1 = make_surface(SURF_SPHERICAL, 50.0f, 0.0f);     t1.ior = 1.5f; t1.thickness = 0.001f;
+        Surface t2 = make_surface(SURF_SPHERICAL, -50.0f, 0.0f);    t2.ior = 1.0f; t2.thickness = 50.0f;
+        ana.surfaces = { c1, f1, f2, c2, t1, t2 };
+        ana.compute_geometry();
+        assert(approx(ana.paraxial_focal(false), 50.0f, 0.1f));
+        assert(approx(ana.squeeze, 2.0f, 0.01f));
+
+        // A "squeeze:" line in the file wins.
+        ana.squeeze_from_file = 1.8f;
+        ana.compute_geometry();
+        assert(approx(ana.squeeze, 1.8f, 1e-6f));
+        printf("PASS: anamorphic squeeze from paraxial focal lengths\n");
+    }
+
     printf("\nAll M2 + M4 smoke tests passed.\n");
     return 0;
 }

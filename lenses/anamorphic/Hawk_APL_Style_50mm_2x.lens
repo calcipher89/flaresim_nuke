@@ -1,0 +1,42 @@
+# Hawk APL style 50mm 2x
+#
+# Front anamorphic made by lenses/make_anamorphic.py from
+#   lens_files/Leica_50mm_F1.4_(Leica_Summilux-M_50mm_F1.4).lens
+# scaled to 50mm, with the iris set to f/2.8 (the stop of the reference footage).
+# A Galilean cylindrical attachment (BK7 glass, coating 1) in front of the
+# original lens.  Horizontal field 2x wider (squeeze 2x paraxial), vertical
+# unchanged; focal_length below is the vertical (taking lens) focal length.
+# The attachment's cylinders are 3.25x weaker than make_anamorphic.py's
+# default and its apertures 1.5x larger, which sets the streak to about
+# half the frame width, as in the reference.
+# NOT a Vantage Hawk prescription (none is public).  A stand-in for flare
+# work, tuned against Hawk APL test footage: thin pale streak about half the
+# frame wide, lavender oval ghost mirrored below the light, six-point
+# starburst, soft veil.
+# See looks/Hawk_APL_Style_50mm_2x.json for the matching look.
+
+name: Hawk APL style 50mm 2x
+focal_length: 50
+
+surfaces:
+# radius     thickness   ior      abbe   semi_ap   coating  type
+# --- Front anamorphic attachment: 2x squeeze, cylinder axes vertical ---
+  -165.893  3.000  1.51680  64.2  49.6500  1  cyl_y   # plano-concave cylinder, F = -321
+  0  315.666  1.00000  0.0  49.6500  1   # flat back, air gap (solved: afocal)
+  0  5.090  1.51680  64.2  62.0550  1   # flat front of the positive cylinder
+  -331.786  15.000  1.00000  0.0  62.0550  1  cyl_y   # plano-convex cylinder, F = +642
+# --- Taking lens ---
+# radius       thickness    ior      abbe     semi_ap   coating
+  46.7073  6.1482  1.79128  47.40  35.9758  1
+  210.2511  1.2547  1.00000  0.00  35.9758  0
+  21.2437  7.4029  1.64515  57.80  32.0008  1
+  75.3313  2.8086  1.69416  30.90  32.0008  1
+  15.0578  5.6845  1.00000  0.00  22.2239  0
+  stop  4.4789  1.00000  0.00  5.4058  0
+  -19.4620  2.0367  1.67158  32.90  21.3807  1
+  40.9701  7.6539  1.74793  44.70  24.5828  1
+  -29.5541  0.2509  1.00000  0.00  24.5828  0
+  292.6988  3.3878  1.79128  47.40  27.3633  1
+  -88.5844  0.2509  1.00000  0.00  27.3633  0
+  150.6918  2.5577  1.79128  47.40  29.4311  1
+  -201.1718  27.3131  1.00000  0.00  29.4311  0

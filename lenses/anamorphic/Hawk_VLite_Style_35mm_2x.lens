@@ -1,0 +1,44 @@
+# Hawk V-Lite style 35mm 2x
+#
+# Front anamorphic made by lenses/make_anamorphic.py from
+#   lens_files/AI_Nikkor_35mm_F1.4S.lens
+# scaled to 35mm, with the iris set to f/2.2 (the stop of the reference footage).
+# A Galilean cylindrical attachment (BK7 glass, coating 0) in front of the
+# original lens.  Horizontal field 2x wider (squeeze 2x paraxial), vertical
+# unchanged; focal_length below is the vertical (taking lens) focal length.
+# The attachment's apertures are 1.5x make_anamorphic.py's default so
+# off-axis ghosts are not clipped.
+# NOT a Vantage Hawk prescription (none is public).  A stand-in for flare
+# work, tuned against Hawk V-Lite test footage: long saturated blue streak,
+# soft glow.
+# See looks/Hawk_VLite_Style_35mm_2x.json for the matching look.
+
+name: Hawk V-Lite style 35mm 2x
+focal_length: 35
+
+surfaces:
+# radius     thickness   ior      abbe   semi_ap   coating  type
+# --- Front anamorphic attachment: 2x squeeze, cylinder axes vertical ---
+  -51.680  3.000  1.51680  64.2  50.1300  0  cyl_y   # plano-concave cylinder, F = -100
+  0  90.559  1.00000  0.0  50.1300  0   # flat back, air gap (solved: afocal)
+  0  11.320  1.51680  64.2  62.6550  0   # flat front of the positive cylinder
+  -103.360  15.000  1.00000  0.0  62.6550  0  cyl_y   # plano-convex cylinder, F = +200
+# --- Taking lens ---
+# radius       thickness    ior      abbe     semi_ap   coating
+  45.4024  2.0416  1.56883  56.00  42.4995  1
+  24.8887  4.2776  1.00000  0.00  35.7196  0
+  48.6104  2.0416  1.54814  45.90  38.6795  1
+  25.6667  8.5553  1.00000  0.00  32.8796  0
+  37.7215  8.2638  1.80411  46.40  34.3896  1
+  -40.8325  15.5552  1.50137  56.50  34.3896  1
+  151.2091  1.3436  1.00000  0.00  29.1796  0
+  stop  6.4340  1.00000  0.00  8.0685  0
+  -25.9677  4.2776  1.80411  46.40  26.9397  1
+  -18.4718  0.9723  1.78470  26.10  27.7097  1
+  180.2678  1.6527  1.00000  0.00  29.9996  0
+  -110.1316  3.8889  1.77250  49.50  29.9996  1
+  -30.6246  0.0487  1.00000  0.00  31.6596  0
+  -972.2099  3.6946  1.77250  49.50  32.3096  1
+  -52.9373  0.0487  1.00000  0.00  32.3096  0
+  102.0827  3.3054  1.71300  53.90  34.1496  1
+  -106.4327  37.2535  1.00000  0.00  34.1496  0

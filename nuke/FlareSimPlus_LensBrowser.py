@@ -643,7 +643,7 @@ class PreviewRenderer(QtCore.QObject):
 # can be compared side by side.  Bump THUMB_VERSION when the look changes so
 # old cached images are not reused.
 THUMB_SIZE = (240, 135)
-THUMB_VERSION = 1
+THUMB_VERSION = 2   # 2: anamorphic flares laid out desqueezed
 THUMB_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'thumbnails')
 THUMB_PARAMS = dict(
     src_x=0.72 * THUMB_SIZE[0], src_y=0.3 * THUMB_SIZE[1],

@@ -1,0 +1,125 @@
+{
+  "flaresim_look_version": 1,
+  "name": "Hawk V-Lite style 55mm 2x",
+  "description": "Hawk V-Lite style 2x anamorphic: long blue streak, small blue ghost mirrored below the light, soft glow. Tuned against reference footage of the real lens at f/2.8; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
+  "lens": "anamorphic/Hawk_VLite_Style_55mm_2x.lens",
+  "knobs": {
+    "flare_gain": 10.0,
+    "aperture_blades": 7,
+    "aperture_rotation": 0,
+    "spectral_samples": 3,
+    "spectral_jitter": true,
+    "ghost_blur": 0.0025,
+    "ghost_blur_passes": 3,
+    "haze_enable": true,
+    "haze_gain": 0.63,
+    "haze_radius": 0.15,
+    "starburst_enable": true,
+    "starburst_gain": 3000,
+    "starburst_scale": 0.3,
+    "surf_gain_0": 0.25,
+    "surf_color_0": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_1": 0.25,
+    "surf_color_1": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_2": 2.1709,
+    "surf_color_2": [
+      0.589,
+      0.809,
+      1.0
+    ],
+    "surf_gain_3": 2.1709,
+    "surf_color_3": [
+      0.589,
+      0.809,
+      1.0
+    ],
+    "surf_gain_4": 0.25,
+    "surf_color_4": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_5": 0.03,
+    "surf_color_5": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_6": 3.749,
+    "surf_color_6": [
+      0.619,
+      1.0,
+      0.851
+    ],
+    "surf_scale_6": 0.825,
+    "surf_gain_7": 0.25,
+    "surf_color_7": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_8": 0.1,
+    "surf_color_8": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_9": 0.25,
+    "surf_color_9": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_10": 0.25,
+    "surf_color_10": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_11": 0.25,
+    "surf_color_11": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_12": 0.25,
+    "surf_color_12": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_13": 0.25,
+    "surf_color_13": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_14": 3.749,
+    "surf_color_14": [
+      0.619,
+      1.0,
+      0.851
+    ],
+    "surf_scale_14": 0.825,
+    "surf_gain_15": 0.25,
+    "surf_color_15": [
+      1.0,
+      0.993,
+      0.983
+    ],
+    "surf_gain_16": 0.25,
+    "surf_color_16": [
+      1.0,
+      0.993,
+      0.983
+    ]
+  }
+}

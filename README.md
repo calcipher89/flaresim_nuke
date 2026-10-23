@@ -331,6 +331,10 @@ Anamorphic lenses produce ghosts and flares with a different shape than spherica
 
 `lenses/anamorphic/` has front anamorphics built on real primes: the Leica Summilux-C 40mm and 100mm T1.4, Leica Summilux-M 50mm f/1.4, and Nikkor 35mm and 85mm f/1.4, each at 1.33x, 1.8x and 2x squeeze. They show up under **Anamorphic** in the Lens Browser's type filter. Each one is the original lens with an uncoated Galilean cylindrical attachment in front (like Iscorama-style adapters and classic scope attachments), which gives the horizontal streak. They are plausible designs for flare work, not real products. `focal_length` is the vertical one; the horizontal field of view is the squeeze times wider.
 
+FlareSim+ expects a **desqueezed** plate. It works out the squeeze from the lens (vertical over horizontal focal length) and lays the flare out desqueezed, so it lines up with the light and the ghosts come out as wide ovals. Set **FOV H** (or the camera) to the desqueezed horizontal field of view. To force a value, add a `squeeze: 2` line under `focal_length:` in the .lens file.
+
+**Hawk-style lenses.** There is no public prescription for any Vantage Hawk lens, so `lenses/anamorphic/` also has six stand-ins tuned against Hawk test footage, each with a look of the same name: *Hawk V-Lite style* 35, 55 and 110mm (uncoated attachment, long blue streak, small blue ghost mirrored below the light, magenta veil on the 110) and *Hawk APL style* 30, 50 and 100mm (single-coated attachment; pale streak, a lavender oval ghost and six-point starburst on the 50, a red-pink oval ghost on the 100). Each lens has its iris set to the stop of the footage. The streak, the mirrored ghost and the veil were matched to light-on minus light-off frames of the footage at 1920 wide; the looks assume a white light, so use Colour From Plate or Light Colour for the light's own tint. Start from the look, then tune Flare Gain, Haze and Starburst to the shot.
+
 Make your own from any spherical lens with `lenses/make_anamorphic.py`:
 
 ```

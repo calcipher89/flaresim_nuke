@@ -4,6 +4,7 @@
 
 #include "lens.h"
 
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <locale>
@@ -16,6 +17,7 @@
 //   # comment
 //   name: My Lens 50mm f/1.4
 //   focal_length: 50.0
+//   squeeze: 2.0          (optional; computed from the surfaces when absent)
 //
 //   surfaces:
 //   # radius   thickness   ior    abbe   semi_ap   coating  [type]   [radius_y]
@@ -50,6 +52,7 @@ bool LensSystem::load(const char *filename)
     surfaces.clear();
     name.clear();
     focal_length = 0;
+    squeeze_from_file = 0;
 
     bool in_surfaces = false;
     std::string line;
@@ -83,6 +86,13 @@ bool LensSystem::load(const char *filename)
                 std::istringstream fl_ss(line.substr(13));
                 fl_ss.imbue(std::locale::classic());
                 fl_ss >> focal_length;
+                continue;
+            }
+            if (line.substr(0, 8) == "squeeze:")
+            {
+                std::istringstream sq_ss(line.substr(8));
+                sq_ss.imbue(std::locale::classic());
+                sq_ss >> squeeze_from_file;
                 continue;
             }
             if (line.substr(0, 9) == "surfaces:")
@@ -196,6 +206,51 @@ void LensSystem::compute_geometry()
         z += surfaces[i].thickness;
     }
     sensor_z = z;
+
+    squeeze = 1.0f;
+    if (squeeze_from_file > 0.0f)
+    {
+        squeeze = squeeze_from_file;
+    }
+    else
+    {
+        const float fx = paraxial_focal(true);
+        const float fy = paraxial_focal(false);
+        if (fx != 0.0f && fy != 0.0f)
+        {
+            const float s = std::fabs(fy / fx);
+            // Spherical lenses come out at exactly 1; ignore rounding.
+            if (s > 0.1f && s < 10.0f && std::fabs(s - 1.0f) > 0.005f)
+                squeeze = s;
+        }
+    }
+}
+
+float LensSystem::paraxial_focal(bool horizontal) const
+{
+    // Trace a ray parallel to the axis at height 1 (y-nu form).
+    double y = 1.0, u = 0.0, n = 1.0;
+    for (size_t i = 0; i < surfaces.size(); ++i)
+    {
+        const Surface& s = surfaces[i];
+        double r = s.radius;
+        switch (s.surface_type)
+        {
+            case SURF_CYLINDER_X: if (horizontal)  r = 0.0; break;
+            case SURF_CYLINDER_Y: if (!horizontal) r = 0.0; break;
+            case SURF_TORIC:      if (!horizontal) r = s.radius_y; break;
+            default: break;
+        }
+        const double c  = (r != 0.0) ? 1.0 / r : 0.0;
+        const double n2 = s.ior;
+        u = (n * u - y * c * (n2 - n)) / n2;
+        n = n2;
+        if (i + 1 < surfaces.size())
+            y += s.thickness * u;
+    }
+    if (std::fabs(u) < 1e-9)
+        return 0.0f;
+    return (float)(-1.0 / u);
 }
 
 static const char* surface_type_label(int t)

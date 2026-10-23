@@ -70,6 +70,14 @@ struct LensSystem
     std::string name;
     float focal_length = 0; // nominal focal length (mm), from file
 
+    // Anamorphic squeeze: vertical / horizontal paraxial focal length, so
+    // 1 for spherical lenses and 2 for a 2x front anamorphic.  Computed by
+    // compute_geometry(); a "squeeze:" line in the file overrides it.
+    // The renderer divides the sensor width by it, which lays the flare
+    // out desqueezed, the way the plate is viewed.
+    float squeeze = 1.0f;
+    float squeeze_from_file = 0.0f;  // 0 = not given
+
     std::vector<Surface> surfaces;
     float sensor_z = 0; // axial position of sensor plane (mm), computed
 
@@ -78,6 +86,10 @@ struct LensSystem
 
     // Compute surface z positions and sensor_z from thicknesses.
     void compute_geometry();
+
+    // Paraxial effective focal length in the horizontal (x) or vertical
+    // plane, from the cylinder/toric curvatures; 0 when the lens is afocal.
+    float paraxial_focal(bool horizontal) const;
 
     // IOR of the medium BEFORE surface idx (air for the first surface).
     float ior_before(int idx) const
