@@ -18,9 +18,9 @@ namespace {
 
 // Pupil samples per side for the trace: enough for a ghost's centre and
 // light, cheap next to the render.  A ghost that only a corner of the
-// pupil reaches gets few of them, so it is traced again on the finer grid.
-constexpr int kGrid = 12;
-constexpr int kFineGrid = 40;
+// pupil reaches gets few of them, so it is traced again on finer grids
+// (a ghost through a thin sliver of the pupil can miss even the 40 grid).
+constexpr int kGrids[] = { 12, 40, 128 };
 constexpr int kMinHits = 8;
 
 // The same round / polygonal iris as the ghost render's pupil grid.
@@ -123,9 +123,10 @@ std::vector<GhostStreak> trace_ghost_streaks(const LensSystem& lens,
             }
         return pts;
     };
-    const std::vector<std::pair<float, float>> coarse = make_pupil(kGrid);
-    if (coarse.empty()) return out;
-    std::vector<std::pair<float, float>> fine;   // made when first needed
+    constexpr int n_grids = (int)(sizeof(kGrids) / sizeof(kGrids[0]));
+    std::vector<std::pair<float, float>> pupils[n_grids];   // finer ones made when first needed
+    pupils[0] = make_pupil(kGrids[0]);
+    if (pupils[0].empty()) return out;
     const std::vector<SpectralSample> spectra = spectral_samples(cfg);
     const float front_R = lens.surfaces[0].semi_aperture;
     const float start_z = lens.surfaces[0].z - 20.0f;
@@ -182,9 +183,9 @@ std::vector<GhostStreak> trace_ghost_streaks(const LensSystem& lens,
                 ray_weight = 1.0 / (double)pupil.size();
                 return hits;
             };
-            if (trace(coarse) < kMinHits * (int)spectra.size() / 3) {
-                if (fine.empty()) fine = make_pupil(kFineGrid);
-                trace(fine);
+            for (int gi = 0; trace(pupils[gi]) < kMinHits * (int)spectra.size() / 3 && gi + 1 < n_grids; ) {
+                ++gi;
+                if (pupils[gi].empty()) pupils[gi] = make_pupil(kGrids[gi]);
             }
             bool any = false;
             for (int c = 0; c < 3; ++c) {
