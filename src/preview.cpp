@@ -531,7 +531,7 @@ Optics make_optics(Preview& pv, const FspParams* p, int w, int h)
     o.src.b = std::max(p->src_b, 0.0f) * si;
 
     if (!pv.lens_ok) return o;
-    o.shw = pv.lens.focal_length * tan_half_h;
+    o.shw = pv.lens.focal_length * tan_half_h / pv.lens.squeeze;   // desqueezed, as FlareSim
     o.shh = pv.lens.focal_length * tan_half_v;
 
     GhostConfig& cfg = o.cfg;

@@ -1808,7 +1808,10 @@ public:
 
         if (Op::aborted()) { zero_buffers(); return; }
 
-        const float sensor_half_w = lens_.focal_length * std::tan(fov_h * 0.5f);
+        // An anamorphic lens squeezes the picture on the sensor; dividing
+        // the sensor width by the squeeze lays the flare out desqueezed,
+        // matching a desqueezed plate (1 for spherical lenses).
+        const float sensor_half_w = lens_.focal_length * std::tan(fov_h * 0.5f) / lens_.squeeze;
         const float sensor_half_h = lens_.focal_length * std::tan(fov_v * 0.5f);
 
         GhostConfig cfg;

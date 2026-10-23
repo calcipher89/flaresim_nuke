@@ -1,0 +1,107 @@
+{
+  "flaresim_look_version": 1,
+  "name": "Hawk APL style 50mm 2x",
+  "description": "Hawk APL style 2x anamorphic: thin pale streak, warm pink oval ghosts, strong starburst and veil. Built from reference footage, not a Vantage prescription.",
+  "lens": "anamorphic/Hawk_APL_Style_50mm_2x.lens",
+  "knobs": {
+    "flare_gain": 10.0,
+    "aperture_blades": 0,
+    "spectral_samples": 3,
+    "spectral_jitter": true,
+    "ghost_blur": 0.004,
+    "ghost_blur_passes": 3,
+    "haze_enable": true,
+    "haze_gain": 0.3,
+    "starburst_enable": true,
+    "starburst_gain": 100.0,
+    "surf_gain_0": 4.0,
+    "surf_color_0": [
+      0.85,
+      0.92,
+      1.0
+    ],
+    "surf_gain_1": 4.0,
+    "surf_color_1": [
+      0.85,
+      0.92,
+      1.0
+    ],
+    "surf_gain_2": 4.0,
+    "surf_color_2": [
+      0.85,
+      0.92,
+      1.0
+    ],
+    "surf_gain_3": 4.0,
+    "surf_color_3": [
+      0.85,
+      0.92,
+      1.0
+    ],
+    "surf_color_4": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_5": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_6": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_7": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_8": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_9": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_10": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_11": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_12": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_13": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_14": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_15": [
+      1.0,
+      0.75,
+      0.85
+    ],
+    "surf_color_16": [
+      1.0,
+      0.75,
+      0.85
+    ]
+  }
+}

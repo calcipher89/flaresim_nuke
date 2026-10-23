@@ -1335,7 +1335,8 @@ public:
         // (where ghosts land on screen).
         const float lens_fl = (lens_.focal_length > 0.1f)
                                 ? lens_.focal_length : cam_focal;
-        const float sensor_half_w = lens_fl * std::tan(fov_h * 0.5f);
+        // Desqueezed layout for anamorphic lenses (squeeze 1 for spherical).
+        const float sensor_half_w = lens_fl * std::tan(fov_h * 0.5f) / lens_.squeeze;
         const float sensor_half_h = lens_fl * std::tan(fov_v * 0.5f);
 
         GhostConfig cfg;

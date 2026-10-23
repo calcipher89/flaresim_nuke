@@ -7,6 +7,7 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 ### Added
 - Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
 - Viewer Quality: a lower Quality for the Viewer only; renders always use full Quality. (#46)
+- Six Hawk-style 2x anamorphic lenses with matching looks, built by eye from Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, faint ghosts) and Hawk APL style 30/50/100mm (thin pale streak, warm oval ghosts, starburst). `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`.
 - `FLARESIM_TRACE_LOG`: set it to a file path and both nodes log each update, compute (and whether Nuke cancelled it) and first row served, for tracking down Viewer refresh problems.
 
 ### Changed
@@ -14,6 +15,7 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 - A render Nuke cancels (a knob changed mid-render) now stops within a GPU batch or two instead of finishing the frame, so changing knobs at High no longer stalls the UI for seconds.
 
 ### Fixed
+- Anamorphic lenses: the flare landed at half the distance from the frame centre and ghosts stayed round, because the flare was laid out squeezed on a desqueezed plate. The squeeze is now worked out from the lens (or a `squeeze:` line in the .lens file) and the flare is laid out desqueezed, so it sits on the light and ghosts come out as wide ovals. Spherical lenses are unchanged. Not yet on the macOS Metal nodes.
 - The Viewer could stay black for a frame after a parameter change until the frame changed: a compute Nuke cancelled part way was kept as the finished result.
 
 ## 1.2.0 (2026-10-13)

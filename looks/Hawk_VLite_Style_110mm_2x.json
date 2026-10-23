@@ -1,0 +1,67 @@
+{
+  "flaresim_look_version": 1,
+  "name": "Hawk V-Lite style 110mm 2x",
+  "description": "Hawk V-Lite style 2x anamorphic: long blue streak across frame, faint ghosts, light veil. Built from reference footage, not a Vantage prescription.",
+  "lens": "anamorphic/Hawk_VLite_Style_110mm_2x.lens",
+  "knobs": {
+    "flare_gain": 10.0,
+    "aperture_blades": 0,
+    "spectral_samples": 3,
+    "spectral_jitter": true,
+    "ghost_blur": 0.003,
+    "ghost_blur_passes": 3,
+    "haze_enable": true,
+    "haze_gain": 0.1,
+    "starburst_enable": false,
+    "surf_gain_0": 3.0,
+    "surf_color_0": [
+      0.6,
+      0.75,
+      1.0
+    ],
+    "surf_gain_1": 3.0,
+    "surf_color_1": [
+      0.6,
+      0.75,
+      1.0
+    ],
+    "surf_gain_2": 3.0,
+    "surf_color_2": [
+      0.6,
+      0.75,
+      1.0
+    ],
+    "surf_gain_3": 3.0,
+    "surf_color_3": [
+      0.6,
+      0.75,
+      1.0
+    ],
+    "surf_gain_4": 0.3,
+    "surf_gain_5": 0.3,
+    "surf_gain_6": 0.3,
+    "surf_gain_7": 0.3,
+    "surf_gain_8": 0.3,
+    "surf_gain_9": 0.3,
+    "surf_gain_10": 0.3,
+    "surf_gain_11": 0.3,
+    "surf_gain_12": 0.3,
+    "surf_gain_13": 0.3,
+    "surf_gain_14": 0.3,
+    "surf_gain_15": 0.3,
+    "surf_gain_16": 0.3,
+    "surf_gain_17": 0.3,
+    "surf_gain_18": 0.3,
+    "surf_gain_19": 0.3,
+    "surf_gain_20": 0.3,
+    "surf_gain_21": 0.3,
+    "surf_gain_22": 0.3,
+    "surf_gain_23": 0.3,
+    "surf_gain_24": 0.3,
+    "surf_gain_25": 0.3,
+    "surf_gain_26": 0.3,
+    "surf_gain_27": 0.3,
+    "surf_gain_28": 0.3,
+    "surf_gain_29": 0.3
+  }
+}

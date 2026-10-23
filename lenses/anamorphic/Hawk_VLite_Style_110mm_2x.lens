@@ -1,0 +1,49 @@
+# Hawk V-Lite style 110mm 2x
+#
+# Front anamorphic made by lenses/make_anamorphic.py from
+#   lens_files/Leica_100mm_(Leica_Summilux_C_100mm_T1.4).lens (scaled to 110mm)
+# A Galilean cylindrical attachment (BK7 glass, coating 0) in front of the
+# original lens.  Horizontal field 2x wider (squeeze 2.000x paraxial), vertical
+# unchanged; focal_length below is the vertical (taking lens) focal length.
+# NOT a Vantage Hawk prescription (none is public).  A stand-in for flare
+# work, matched by eye to Hawk V-Lite test footage: long blue streak, faint ghosts.
+# See looks/Hawk_VLite_Style_110mm_2x.json for the matching look.
+
+name: Hawk V-Lite style 110mm 2x
+focal_length: 110
+
+surfaces:
+# radius     thickness   ior      abbe   semi_ap   coating  type
+# --- Front anamorphic attachment: 2x squeeze, cylinder axes vertical ---
+  -117.830   3.000      1.51680  64.2   76.31     0        cyl_y     # plano-concave cylinder, F = -228
+  0          211.076    1.00000  0.0    76.31     0                  # flat back, air gap (solved: afocal)
+  0          22.670     1.51680  64.2   95.39     0                  # flat front of the positive cylinder
+  -235.661   15.000     1.00000  0.0    95.39     0        cyl_y     # plano-convex cylinder, F = +456
+# --- Taking lens ---
+# radius       thickness    ior      abbe     semi_ap   coating
+  0.0000  3.3249  1.51630  64.15  82.9452  1
+  0.0000  2.2166  1.00000  0.00  82.3245  0
+  82.6027  14.6684  1.49700  81.61  78.8666  1
+  -450.5960  0.1108  1.00000  0.00  77.7805  0
+  51.5947  16.8960  1.74400  44.79  68.3821  1
+  -558.2385  3.9866  1.61340  44.27  65.1902  1
+  32.4998  15.4198  1.00000  0.00  46.7703  0
+  -60.0510  2.1302  1.61340  44.27  46.5264  1
+  69.1114  7.4356  1.00000  0.00  46.4821  0
+  -88.2916  11.0974  1.76200  40.10  46.6151  1
+  -30.8440  2.4737  1.72050  34.71  48.0116  1
+  -875.6889  2.0060  1.00000  0.00  54.3732  0
+  139.7378  14.8368  1.49700  81.61  58.3409  1
+  -53.8523  15.7379  1.00000  0.00  59.3162  0
+  stop  0.9975  1.00000  0.00  57.1661  0
+  51.7820  9.2842  1.43870  94.96  56.0135  1
+  301.7890  0.1108  1.00000  0.00  54.9717  0
+  50.6294  6.0945  1.80810  22.76  51.4916  1
+  48.3152  10.4646  1.00000  0.00  47.1249  0
+  -70.8791  5.9837  1.43870  94.96  46.9254  1
+  -39.7159  3.8746  1.72050  34.71  46.4599  1
+  171.6380  1.9484  1.00000  0.00  47.7012  0
+  142.7202  3.7981  1.80810  22.76  48.7430  1
+  540.9989  0.1108  1.00000  0.00  49.0977  0
+  284.5272  9.5181  1.80400  46.58  49.3415  1
+  -54.1294  49.6518  1.00000  0.00  49.6518  0
