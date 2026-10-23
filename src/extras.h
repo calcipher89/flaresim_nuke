@@ -38,8 +38,20 @@ struct ExtrasConfig
     float haze_gain        = 0.0f;   // 0 = off
     float haze_radius      = 0.15f;  // blur radius, fraction of the diagonal
     int   haze_passes      = 3;      // box-blur passes (3 ~ Gaussian)
+    // 0 = one soft glow of Haze Radius.  Towards 1, more of the light goes
+    // into tighter glows (a third and a ninth of the radius), so the haze
+    // is bright near the light and falls off about as 1/distance, as the
+    // veiling glare of a real lens does.  The total light stays the same.
+    float haze_shape       = 0.0f;
+    float haze_tint[3]     = { 1.0f, 1.0f, 1.0f };   // multiplies the light's colour
     float starburst_gain   = 0.0f;   // 0 = off
     float starburst_scale  = 0.15f;  // spike length, fraction of the diagonal
+    float starburst_tint[3] = { 1.0f, 1.0f, 1.0f };
+    // How much wider the spikes are in red than in blue: 1 = as in a real
+    // lens (by wavelength), 0 = the same in every colour (no colour fringes).
+    float starburst_fringe = 1.0f;
+    // Softens the spikes: blur, as a fraction of the spike length.
+    float starburst_softness = 0.0f;
     int   aperture_blades  = 0;      // 0 = round (no spikes, Airy rings)
     float aperture_rotation = 0.0f;  // degrees
     int   max_starbursts   = 32;     // brightest lights that get spikes
@@ -76,6 +88,7 @@ struct GlowField
                  float ref_peak, const ExtrasFrame& frame,
                  const std::vector<BrightPixel>& lights);
     void clear();
+    void tint(const float rgb[3]);
     bool empty() const { return ch[0].empty(); }
     void add_row(int c, int y, int x0, int x1, float* dst) const;
 };
@@ -98,7 +111,8 @@ public:
                  const std::vector<BrightPixel>& lights);
     void clear();
 
-    bool has_haze()      const { return !haze_.empty(); }
+    bool has_haze()      const { return !haze_.empty() || !haze_core_[0].empty()
+                                        || !haze_core_[1].empty(); }
     bool has_starburst() const { return !star_[0].empty(); }
     bool has_dirt()      const { return !dirt_.empty(); }
     bool has_dirt_image() const { return !dirt_img_[0].empty(); }
@@ -122,7 +136,11 @@ public:
     // Add (or write) channel c (0 R, 1 G, 2 B) of buffer row y, columns
     // x0..x1 (buffer coordinates) to dst[0 .. x1 - x0).
     void add_haze_row     (int c, int y, int x0, int x1, float* dst) const
-    { haze_.add_row(c, y, x0, x1, dst); }
+    {
+        haze_.add_row(c, y, x0, x1, dst);
+        haze_core_[0].add_row(c, y, x0, x1, dst);
+        haze_core_[1].add_row(c, y, x0, x1, dst);
+    }
     // The light reaching the lens dirt (multiply by the dirt image).
     void add_dirt_light_row(int c, int y, int x0, int x1, float* dst) const
     { dirt_.add_row(c, y, x0, x1, dst); }
@@ -133,6 +151,7 @@ private:
                            const std::vector<BrightPixel>& lights);
 
     GlowField haze_;
+    GlowField haze_core_[2];   // Haze Shape: tighter glows near the light
     GlowField dirt_;      // light on the lens dirt
     std::vector<float> dirt_img_[3];   // softened dirt image, full res
     int dirt_w_ = 0, dirt_h_ = 0;
@@ -147,6 +166,7 @@ private:
     int   psf_n_ = 0;
     int   psf_blades_ = -1;
     float psf_rotation_ = 0.0f;
+    float psf_softness_ = 0.0f;
 };
 
 // Defocus an image (in place) with a blob the shape of the iris, radius

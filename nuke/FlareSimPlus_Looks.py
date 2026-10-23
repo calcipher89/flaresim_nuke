@@ -91,9 +91,14 @@ LOOK_KNOBS = (
     'haze_gain',
     'haze_radius',
     'haze_passes',
+    'haze_shape',
+    'haze_tint',
     'starburst_enable',
     'starburst_gain',
     'starburst_scale',
+    'starburst_tint',
+    'starburst_fringe',
+    'starburst_softness',
     'dirt_gain',
     'dirt_spread',
     'dirt_softness',
@@ -104,6 +109,17 @@ LOOK_KNOBS = (
 # Render settings a look no longer carries.  Older look files still list
 # them; applying a look leaves the node's Quality alone.
 SKIPPED_KNOBS = ('ray_grid', 'viewer_quality', 'render_full')
+
+# Knobs added after looks were first saved, with their defaults.  A look
+# that doesn't list one puts it back to the default, so an older look still
+# looks the way it did when it was saved.
+LATER_KNOB_DEFAULTS = {
+    'haze_shape': 0.0,
+    'haze_tint': [1.0, 1.0, 1.0],
+    'starburst_tint': [1.0, 1.0, 1.0],
+    'starburst_fringe': 1.0,
+    'starburst_softness': 0.0,
+}
 
 # Per-surface override knobs (Surfaces tab) and their defaults.
 MAX_SURFS = 50
@@ -551,6 +567,9 @@ def apply_look(look, nodes, reset_surfaces=True):
                         _set_knob_value(knobs[k], default)
             if reset_surfaces and GHOST_KNOB in knobs:
                 knobs[GHOST_KNOB].setValue('')
+            for k, default in LATER_KNOB_DEFAULTS.items():
+                if k in knobs and k not in values:
+                    _set_knob_value(knobs[k], default)
             for k, v in values.items():
                 if k in knobs and k not in SKIPPED_KNOBS:
                     _set_knob_value(knobs[k], v)

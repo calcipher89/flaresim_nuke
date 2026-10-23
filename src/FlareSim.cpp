@@ -287,9 +287,14 @@ public:
     float       haze_gain_;
     float       haze_radius_;
     int         haze_passes_;
+    float       haze_shape_;
+    float       haze_tint_[3];
     bool        starburst_enable_;
     float       starburst_gain_;
     float       starburst_scale_;
+    float       starburst_tint_[3];
+    float       starburst_fringe_;
+    float       starburst_softness_;
     bool        dirt_enable_;              // Lens Dirt
     float       dirt_gain_;
     float       dirt_spread_;
@@ -464,9 +469,12 @@ public:
         , haze_gain_(0.1f)
         , haze_radius_(0.15f)
         , haze_passes_(3)
+        , haze_shape_(0.0f)
         , starburst_enable_(false)
         , starburst_gain_(100.0f)
         , starburst_scale_(0.15f)
+        , starburst_fringe_(1.0f)
+        , starburst_softness_(0.0f)
         , dirt_enable_(false)
         , dirt_gain_(1.0f)
         , dirt_spread_(0.4f)
@@ -502,6 +510,7 @@ public:
         manual_xy_[0] = 960.0;  // sensible default (centre of 1920 frame)
         manual_xy_[1] = 540.0;
         light_color_[0] = light_color_[1] = light_color_[2] = 1.0f;
+        for (int c = 0; c < 3; ++c) haze_tint_[c] = starburst_tint_[c] = 1.0f;
         color_from_plate_ = false;
         outside_source_color_[0] = 1.0f;
         outside_source_color_[1] = 1.0f;
@@ -990,6 +999,16 @@ public:
         SetRange(f, 1, 6);
         Tooltip(f, "Box-blur passes.  3 approximates a Gaussian; more gives "
                    "a softer core.");
+        adv_.add(f, Float_knob(f, &haze_shape_, "haze_shape", "Haze Shape"));
+        SetRange(f, 0.0, 1.0);
+        Tooltip(f, "How the haze falls off.  0 = one soft, even glow of Haze "
+                   "Radius.  Towards 1, more of the haze gathers close to the "
+                   "light and fades out gradually, like the veiling glare of "
+                   "a real lens (bright near the light, a long faint tail).  "
+                   "The total haze stays the same.");
+        adv_.add(f, Color_knob(f, haze_tint_, "haze_tint", "Haze Tint"));
+        Tooltip(f, "Colours the haze, on top of the light's own colour.  "
+                   "Coated lenses often give a warm or a cool veil.");
 
         Divider(f, "Starburst");
         Bool_knob(f, &starburst_enable_, "starburst_enable", "Starburst");
@@ -1008,6 +1027,18 @@ public:
         adv_.add(f, Float_knob(f, &starburst_scale_, "starburst_scale", "Starburst Size"));
         SetRange(f, 0.01, 0.5);
         Tooltip(f, "Length of the spikes, as a fraction of the image diagonal.");
+        adv_.add(f, Color_knob(f, starburst_tint_, "starburst_tint", "Starburst Tint"));
+        Tooltip(f, "Colours the spikes, on top of the light's own colour.");
+        adv_.add(f, Float_knob(f, &starburst_fringe_, "starburst_fringe", "Starburst Fringe"));
+        SetRange(f, 0.0, 2.0);
+        Tooltip(f, "Colour fringing along the spikes.  1 = as in a real lens "
+                   "(red spreads wider than blue).  0 = the same in every "
+                   "colour, no fringes.  Above 1 exaggerates the rainbow.");
+        adv_.add(f, Float_knob(f, &starburst_softness_, "starburst_softness", "Starburst Softness"));
+        SetRange(f, 0.0, 0.05);
+        Tooltip(f, "Softens and widens the spikes (a blur, as a fraction of "
+                   "their length).  0 = crisp; 0.005 to 0.02 for the softer "
+                   "spikes of an older or hazier lens.");
 
         Divider(f, "Lens Dirt");
         Bool_knob(f, &dirt_enable_, "dirt_enable", "Lens Dirt");
@@ -1154,9 +1185,10 @@ public:
             const bool over = (clip_to_ == flaresim::kClipOverscan);
             if (Knob* x = knob("overscan_w")) x->enable(over);
             if (Knob* x = knob("overscan_h")) x->enable(over);
-            for (const char* name : { "haze_gain", "haze_radius", "haze_passes" })
+            for (const char* name : { "haze_gain", "haze_radius", "haze_passes", "haze_shape", "haze_tint" })
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
-            for (const char* name : { "starburst_gain", "starburst_scale" })
+            for (const char* name : { "starburst_gain", "starburst_scale", "starburst_tint",
+                                      "starburst_fringe", "starburst_softness" })
                 if (Knob* x = knob(name)) x->enable(starburst_enable_);
             for (const char* name : { "dirt_gain", "dirt_spread", "dirt_softness",
                                       "dirt_scatter", "dirt_ghosts" })
@@ -1780,6 +1812,13 @@ public:
             xc.haze_passes       = haze_passes_;
             xc.starburst_gain    = starburst_enable_ ? starburst_gain_ : 0.0f;
             xc.starburst_scale   = starburst_scale_;
+            xc.starburst_fringe   = starburst_fringe_;
+            xc.starburst_softness = starburst_softness_;
+            xc.haze_shape         = haze_shape_;
+            for (int c = 0; c < 3; ++c) {
+                xc.haze_tint[c]      = haze_tint_[c];
+                xc.starburst_tint[c] = starburst_tint_[c];
+            }
             xc.dirt_gain         = dirt_input() ? dirt_gain_ : 0.0f;
             xc.dirt_spread       = dirt_spread_;
             xc.aperture_blades   = aperture_blades_;

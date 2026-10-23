@@ -16,6 +16,20 @@ static void check(bool ok, const char* what, double got)
     if (!ok) ++failures;
 }
 
+// Sum of channel c over the whole frame.
+static double total(const FlareExtras& fx, int c, int w, int h, bool haze)
+{
+    std::vector<float> row;
+    double t = 0.0;
+    for (int y = 0; y < h; ++y) {
+        row.assign(w, 0.0f);
+        if (haze) fx.add_haze_row(c, y, 0, w, row.data());
+        else      fx.add_starburst_row(c, y, 0, w, row.data());
+        for (float v : row) t += v;
+    }
+    return t;
+}
+
 static void write_ppm(const std::string& path, const FlareExtras& fx, int w, int h, bool haze)
 {
     FILE* f = std::fopen(path.c_str(), "wb");
@@ -83,6 +97,42 @@ int main(int argc, char** argv)
           "haze falls off with distance", row[w / 2 + 100]);
     if (argc > 1) write_ppm(std::string(argv[1]) + "/haze.ppm", fx, w, h, true);
 
+    // Haze Shape: the same total light, gathered closer to the light, with
+    // a long faint tail.
+    {
+        cfg.haze_radius = 0.15f;
+        fx.compute(cfg, fr, lights);
+        const double soft_total = total(fx, 1, w, h, true);
+        row.assign(w, 0.0f);
+        fx.add_haze_row(1, h / 2, 0, w, row.data());
+        const float soft_peak = row[w / 2], soft_far = row[w / 2 + 250];
+        cfg.haze_shape = 1.0f;
+        fx.compute(cfg, fr, lights);
+        const double shaped_total = total(fx, 1, w, h, true);
+        row.assign(w, 0.0f);
+        fx.add_haze_row(1, h / 2, 0, w, row.data());
+        // (A little more stays in frame: the tighter glows lose less off
+        // the frame edges.)
+        check(shaped_total / soft_total > 0.97 && shaped_total / soft_total < 1.08,
+              "Haze Shape keeps about the same total",
+              shaped_total / soft_total);
+        check(row[w / 2] > 3.0f * soft_peak, "Haze Shape is brighter near the light",
+              row[w / 2] / soft_peak);
+        check(row[w / 2 + 250] > 0.0f && row[w / 2 + 250] < soft_far,
+              "Haze Shape keeps a fainter tail", row[w / 2 + 250] / soft_far);
+        cfg.haze_shape = 0.0f;
+
+        // Haze Tint multiplies each channel.
+        const float tint[3] = { 1.0f, 0.5f, 0.0f };
+        for (int c = 0; c < 3; ++c) cfg.haze_tint[c] = tint[c];
+        fx.compute(cfg, fr, lights);
+        const double r = total(fx, 0, w, h, true), g = total(fx, 1, w, h, true),
+                     b = total(fx, 2, w, h, true);
+        check(std::fabs(r / soft_total - 1.0) < 1e-3 && std::fabs(g / soft_total - 0.5) < 1e-3 && b == 0.0,
+              "Haze Tint colours the haze", g / soft_total);
+        for (int c = 0; c < 3; ++c) cfg.haze_tint[c] = 1.0f;
+    }
+
     // Starburst with a six-blade iris.
     cfg.haze_gain = 0.0f;
     cfg.starburst_gain = 8.0f;   // x 1/8: the light at its own brightness
@@ -113,6 +163,49 @@ int main(int argc, char** argv)
     }
     check(best > 20.0f * worst, "six blades give spikes", best / std::max(worst, 1e-12f));
     if (argc > 1) write_ppm(std::string(argv[1]) + "/starburst.ppm", fx, w, h, false);
+
+    // Starburst Fringe 0: every colour the same size, so a white light
+    // gives white spikes.  At 1, red spreads wider than blue.
+    {
+        const double r1 = total(fx, 0, w, h, false), b1 = total(fx, 2, w, h, false);
+        row.assign(w, 0.0f);
+        fx.add_starburst_row(1, h / 2, 0, w, row.data());
+        const float crisp_peak = row[w / 2];
+        std::vector<float> rr(w, 0.0f), bb(w, 0.0f);
+        fx.add_starburst_row(0, h / 2, 0, w, rr.data());
+        fx.add_starburst_row(2, h / 2, 0, w, bb.data());
+        const int far_x = w / 2 + 60;
+        check(rr[far_x] > bb[far_x], "Fringe 1: red reaches further than blue",
+              rr[far_x] / std::max(bb[far_x], 1e-12f));
+        cfg.starburst_fringe = 0.0f;
+        fx.compute(cfg, fr, lights);
+        rr.assign(w, 0.0f); bb.assign(w, 0.0f);
+        fx.add_starburst_row(0, h / 2, 0, w, rr.data());
+        fx.add_starburst_row(2, h / 2, 0, w, bb.data());
+        float diff = 0.0f;
+        for (int x = 0; x < w; ++x) diff = std::max(diff, std::fabs(rr[x] - bb[x]));
+        check(diff < 1e-6f, "Fringe 0: no colour fringes", diff);
+        cfg.starburst_fringe = 1.0f;
+
+        // Softness blurs the spikes: a lower peak, about the same total.
+        cfg.starburst_softness = 0.01f;
+        fx.compute(cfg, fr, lights);
+        row.assign(w, 0.0f);
+        fx.add_starburst_row(1, h / 2, 0, w, row.data());
+        check(row[w / 2] < 0.8f * crisp_peak, "Softness lowers the peak", row[w / 2] / crisp_peak);
+        const double soft_r = total(fx, 0, w, h, false);
+        check(soft_r / r1 > 0.9 && soft_r / r1 < 1.1, "Softness keeps about the same total", soft_r / r1);
+        cfg.starburst_softness = 0.0f;
+
+        // Tint multiplies each channel.
+        cfg.starburst_tint[2] = 0.0f;
+        cfg.starburst_tint[0] = 0.5f;
+        fx.compute(cfg, fr, lights);
+        const double r2 = total(fx, 0, w, h, false), b2 = total(fx, 2, w, h, false);
+        check(std::fabs(r2 / r1 - 0.5) < 1e-3 && b2 == 0.0 && b1 > 0.0, "Starburst Tint colours the spikes",
+              r2 / r1);
+        for (int c = 0; c < 3; ++c) cfg.starburst_tint[c] = 1.0f;
+    }
 
     // Dirt light: wide, reaches the far side of the frame, peaks at
     // kDirtRefPeak (0.25) at Gain 1 and the default spread.
