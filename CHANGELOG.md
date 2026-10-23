@@ -1,22 +1,41 @@
 # Changelog
 
-Major updates and bug fixes for FlareSim+, newest first. Version numbers match the release zips made with `scripts/package_release.sh --version <x.y.z>`. Pull request numbers link to the full details.
+Major updates and bug fixes for FlareSim+, newest first. Version numbers match the release zips made with `scripts/package_release.sh --version <x.y.z>`, and each release has a git tag (`v1.0.0`, `v1.1.0`, ...) on the commit it was built from. Pull request numbers link to the full details.
 
 ## Unreleased
 
 ### Added
-- Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
+- Six Hawk-style 2x anamorphic lenses with matching looks, tuned against Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, small blue mirrored ghost) and Hawk APL style 30/50/100mm (pale streak, oval ghosts, starburst on the 50). Streak length, mirrored ghost, veil and colours measured from light-on minus light-off frames; irises set to the footage's stops. `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`. (#49)
+- `docs/FACILITY_INSTALL.md`: installing FlareSim+ for a whole facility, including split layouts with Python and plugin files in different folders. (#48)
+
+### Fixed
+- Anamorphic lenses: the flare landed at half the distance from the frame centre and ghosts stayed round, because the flare was laid out squeezed on a desqueezed plate. The squeeze is now worked out from the lens (or a `squeeze:` line in the .lens file) and the flare is laid out desqueezed, so it sits on the light and ghosts come out as wide ovals. Spherical lenses are unchanged. Not yet on the macOS Metal nodes. (#49)
+- Lens Browser preview was blank in split facility installs: it now finds the preview library, lenses and looks next to the loaded plugin too, or from `FLARESIM_PREVIEW_LIB`. (#48)
+
+## 1.5.0 (2026-10-14)
+
+### Changed
+- A render Nuke cancels (a knob changed mid-render) now stops within a GPU batch or two instead of finishing the frame, so changing knobs at High no longer stalls the UI for seconds. (#47)
+
+### Added
+- `FLARESIM_TRACE_LOG`: set it to a file path and both nodes log each update, compute (and whether Nuke cancelled it) and first row served, for tracking down Viewer refresh problems. (#47)
+
+### Fixed
+- The Viewer could stay black for a frame after a parameter change until the frame changed: a compute Nuke cancelled part way was kept as the finished result. (#47)
+
+## 1.4.0 (2026-10-14)
+
+### Added
 - Viewer Quality: a lower Quality for the Viewer only; renders always use full Quality. (#46)
-- Six Hawk-style 2x anamorphic lenses with matching looks, tuned against Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, small blue mirrored ghost) and Hawk APL style 30/50/100mm (pale streak, oval ghosts, starburst on the 50). Streak length, mirrored ghost, veil and colours measured from light-on minus light-off frames; irises set to the footage's stops. `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`.
-- `FLARESIM_TRACE_LOG`: set it to a file path and both nodes log each update, compute (and whether Nuke cancelled it) and first row served, for tracking down Viewer refresh problems.
+
+## 1.3.0 (2026-10-13)
+
+### Added
+- Ghost Render: **Smooth** draws each ghost as a filled mesh, so large ghosts come out clean instead of grainy. New nodes start on Smooth; old scripts keep Points. (#43)
+- This changelog. (#42)
 
 ### Changed
 - Smooth renders much faster, about 7x with many Auto Detect lights. (#44, #45)
-- A render Nuke cancels (a knob changed mid-render) now stops within a GPU batch or two instead of finishing the frame, so changing knobs at High no longer stalls the UI for seconds.
-
-### Fixed
-- Anamorphic lenses: the flare landed at half the distance from the frame centre and ghosts stayed round, because the flare was laid out squeezed on a desqueezed plate. The squeeze is now worked out from the lens (or a `squeeze:` line in the .lens file) and the flare is laid out desqueezed, so it sits on the light and ghosts come out as wide ovals. Spherical lenses are unchanged. Not yet on the macOS Metal nodes.
-- The Viewer could stay black for a frame after a parameter change until the frame changed: a compute Nuke cancelled part way was kept as the finished result.
 
 ## 1.2.0 (2026-10-13)
 
@@ -34,6 +53,7 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 
 ### Added
 - Help > FlareSim+ > Convert FlareSim Nodes, and `FlareSimPlus_Convert.py` to convert old script files without Nuke. (#39)
+- Build guides for a native Linux build (no Docker) and for macOS. (#38)
 
 ## 1.0.0 (2026-10-11)
 
@@ -52,7 +72,7 @@ First FlareSim+ release, built on Peter Mercell's fork of FlareSim.
 - Error log, debug logging and Save Debug Report under Help > FlareSim+. (#29)
 - Haze (veiling glare), starburst, and Output Layers (flare, haze, starburst AOVs). (#33, #34)
 - Lens Dirt input with Dirt Softness and Dirt Scatter, and a dirt layer. (#36, #37)
-- Build guides for Windows, Linux and macOS. (#26, #38)
+- Build guides for Windows and Linux. (#26)
 
 ### Changed
 - Manual XY: the placed point is the light, with Light Colour and optional Colour From Plate. (#17)
