@@ -730,6 +730,44 @@ void FlareExtras::compute_ring(const ExtrasConfig& cfg, const ExtrasFrame& f,
                               std::max(1.0f + rainbow * (450.0f / 550.0f - 1.0f), 0.05f) };
     const float outer = rad_ch[0] + 4.0f * width;
     const float centre = cfg.ring_angle * (float)M_PI / 180.0f;
+    // Ring Streaks: brightness round the ring, a table of thin streaks by
+    // angle with a mean of 1, so the ring keeps its light.
+    const float streaks = std::clamp(cfg.ring_streaks, 0.0f, 1.0f);
+    constexpr int kStreakBins = 4096;
+    std::vector<float> streak_tab;
+    if (streaks > 0.0f) {
+        streak_tab.assign(kStreakBins, 0.0f);
+        const int n = std::clamp(cfg.ring_streak_count, 1, 2000);
+        const float bin = 2.0f * (float)M_PI / kStreakBins;
+        // At least a pixel wide on the ring.
+        const float width0 = std::max(std::max(cfg.ring_streak_width, 0.01f) * (float)M_PI / 180.0f,
+                                      0.7f / std::max(std::min(rx, ry), 1.0f));
+        for (int k = 0; k < n; ++k) {
+            auto rnd = [&](uint32_t salt) {
+                return ray_hash((uint32_t)cfg.rays_seed * 6271u + (uint32_t)k * 4u + salt + 0x9e37u) / 4294967296.0f;
+            };
+            const float a = 2.0f * (float)M_PI * rnd(0);
+            const float value = 0.25f + 0.75f * rnd(1);
+            const float sig = width0 * (0.5f + rnd(2));
+            const int reach = (int)std::ceil(4.0f * sig / bin);
+            const int mid = (int)std::floor(a / bin);
+            for (int j = mid - reach; j <= mid + reach; ++j) {
+                const float da = (j + 0.5f) * bin - a;
+                streak_tab[((j % kStreakBins) + kStreakBins) % kStreakBins] += value * std::exp(-0.5f * da * da / (sig * sig));
+            }
+        }
+        // The mean over the drawn ring, weighted by how much ring each angle
+        // holds (an oval's far ends hold more).
+        double mean = 0.0, wsum = 0.0;
+        for (int j = 0; j < kStreakBins; ++j) {
+            const float a = (j + 0.5f) * bin;
+            const float cu = std::cos(a) / rx, sv = std::sin(a) / ry;
+            const float wt = arc_mask(std::atan2(sv, cu), centre, cfg.ring_arc) / (cu * cu + sv * sv);
+            mean += wt * streak_tab[j]; wsum += wt;
+        }
+        mean /= std::max(wsum, 1e-12);
+        for (float& v : streak_tab) v = (1.0f - streaks) + streaks * (float)(v / std::max(mean, 1e-12));
+    }
     for (const LightPos& p : brightest(lights, f, kMaxRayLights)) {
         const float rgb[3] = { p.r * std::max(cfg.ring_tint[0], 0.0f),
                                p.g * std::max(cfg.ring_tint[1], 0.0f),
@@ -745,8 +783,15 @@ void FlareExtras::compute_ring(const ExtrasConfig& cfg, const ExtrasFrame& f,
                 const float u = (ox + 0.5f - p.x) / rx;
                 const float rho = std::sqrt(u * u + v * v);
                 if (rho > outer) continue;
-                const float m = arc_mask(std::atan2(v, u), centre, cfg.ring_arc);
+                const float phi = std::atan2(v, u);
+                float m = arc_mask(phi, centre, cfg.ring_arc);
                 if (m <= 0.0f) continue;
+                if (!streak_tab.empty()) {
+                    // By the pixel's true angle from the light, so the streaks point at it.
+                    float a = std::atan2(oy + 0.5f - p.y, ox + 0.5f - p.x);
+                    if (a < 0.0f) a += 2.0f * (float)M_PI;
+                    m *= streak_tab[std::min((int)(a / (2.0f * (float)M_PI) * kStreakBins), kStreakBins - 1)];
+                }
                 for (int c = 0; c < 3; ++c) {
                     const float t = (rho - rad_ch[c]) / width;
                     if (t * t > 32.0f) continue;
@@ -772,7 +817,8 @@ void FlareExtras::add_ghost_streak_row(int c, int y, int x0, int x1, float* dst)
     const float py = y + 0.5f;
     for (const GhostStreak& s : streaks_) {
         const float dy = py - s.y[c];
-        const float g = dy * dy / (2.0f * s.sigma * s.sigma);
+        const float g = s.edge == 2.0f ? dy * dy / (2.0f * s.sigma * s.sigma)
+                                       : 0.5f * std::pow(std::fabs(dy) / s.sigma, s.edge);
         if (g > 12.0f || s.peak[c] <= 0.0f) continue;
         const float v = s.peak[c] * std::exp(-g);
         // exp(-|dx| / length), out to 12 lengths, stepped by a constant

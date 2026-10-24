@@ -795,6 +795,7 @@ FSP_API int fsp_render(void* handle, const FspParams* p,
             sg.gain = st.over->streak;
             sg.length = st.over->streak_length;
             sg.thickness = st.over->streak_thickness;
+            sg.edge = st.over->streak_edge;
             streaks.push_back(sg);
         }
         if (!streaks.empty())

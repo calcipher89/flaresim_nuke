@@ -1557,6 +1557,7 @@ public:
                     sg.gain = go->streak;
                     sg.length = go->streak_length;
                     sg.thickness = go->streak_thickness;
+                    sg.edge = go->streak_edge;
                     for (int c = 0; c < 3; ++c) sg.tint[c] = go->streak_col[c];
                     streak_ghosts_.push_back(sg);
                 }

@@ -2399,9 +2399,11 @@ class LensBrowserWindow(QtWidgets.QWidget):
         if key is None:
             return
         g = self._ghosts.get(key, FlareSimPlus_Looks.GHOST_DEFAULT)
-        thick = (g.get('streak') or (0, 0, FlareSimPlus_Looks.STREAK_THICKNESS))[2]
+        old = tuple(g.get('streak') or (0, 0, FlareSimPlus_Looks.STREAK_THICKNESS))
+        thick = old[2]
+        edge = old[3] if len(old) > 3 else FlareSimPlus_Looks.STREAK_EDGE
         gain = self.ghost_streak.value()
-        self._edit_ghost('streak', (gain, self.ghost_streak_len.value(), thick)
+        self._edit_ghost('streak', (gain, self.ghost_streak_len.value(), thick, edge)
                          if gain > 0.0 else None)
 
     def _choose_ghost_colour(self):

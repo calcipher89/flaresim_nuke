@@ -305,6 +305,31 @@ int main(int argc, char** argv)
         check(std::abs((h / 2 - at_r) - ry) < ry / 3, "Ring Aspect: half as tall", h / 2 - at_r);
         fx.add_starburst_row(1, h / 2 + ry, 0, w, top.data());
         check(top[w / 2] == 0.0f, "Ring Arc: the upper half isn't drawn", top[w / 2]);
+
+        // Ring Streaks: the same light, broken up round the ring.
+        auto ring_row = [&](int y, std::vector<float>& g) {
+            g.assign(w, 0.0f); fx.add_starburst_row(1, y, 0, w, g.data());
+        };
+        const int yr = at_r + (at_b - at_r) / 2;   // a row across the lower ring, green's middle
+        std::vector<float> smooth, streaky;
+        double s0 = 0.0, s1 = 0.0;
+        for (int y = 0; y < h; ++y) { ring_row(y, smooth); for (float v : smooth) s0 += v; }
+        ring_row(yr, smooth);
+        cfg.ring_streaks = 1.0f;
+        cfg.ring_streak_count = 60;
+        cfg.ring_streak_width = 0.5f;
+        fx.compute(cfg, fr, lights);
+        for (int y = 0; y < h; ++y) { ring_row(y, streaky); for (float v : streaky) s1 += v; }
+        ring_row(yr, streaky);
+        float lo = 1e9f, hi = 0.0f;
+        for (int x = w / 2 - ry; x < w / 2 + ry; ++x) {
+            if (smooth[x] < 0.2f * best_r) continue;
+            const float q = streaky[x] / smooth[x];
+            lo = std::min(lo, q); hi = std::max(hi, q);
+        }
+        check(hi > 4.0f * std::max(lo, 1e-6f), "Ring Streaks: breaks the ring up", hi / std::max(lo, 1e-6f));
+        check(std::fabs(s1 / s0 - 1.0) < 0.15, "Ring Streaks: keeps the ring's light", s1 / s0);
+        cfg.ring_streaks = 0.0f;
         cfg.ring_gain = 0.0f;
     }
 
@@ -325,6 +350,22 @@ int main(int argc, char** argv)
         check(std::fabs(on[400] / on[300] - std::exp(-1.0f)) < 0.02f, "falls to 1/e at its length",
               on[400] / on[300]);
         check(off[300] < 1e-4f, "ghost streak is thin", off[300]);
+        // Edge: a flat bar with sharp edges, as tall in the middle.
+        st.sigma = 4.0f;
+        fx.set_ghost_streaks({ st });
+        std::vector<float> soft3(w, 0.0f), soft6(w, 0.0f);
+        fx.add_ghost_streak_row(1, 202, 0, w, soft3.data());
+        fx.add_ghost_streak_row(1, 206, 0, w, soft6.data());
+        st.edge = 8.0f;
+        fx.set_ghost_streaks({ st });
+        std::vector<float> bar0(w, 0.0f), bar3(w, 0.0f), bar6(w, 0.0f);
+        fx.add_ghost_streak_row(1, 200, 0, w, bar0.data());
+        fx.add_ghost_streak_row(1, 202, 0, w, bar3.data());
+        fx.add_ghost_streak_row(1, 206, 0, w, bar6.data());
+        check(bar3[300] > 0.95f * bar0[300] && bar3[300] > soft3[300] * 1.1f, "Streak Edge: flat across the middle",
+              bar3[300] / bar0[300]);
+        check(bar6[300] < 0.2f * soft6[300], "Streak Edge: sharp edge", bar6[300] / soft6[300]);
+        st.edge = 2.0f; st.sigma = 1.5f;
         fx.clear();
         check(!fx.has_ghost_streaks(), "clear drops the ghost streaks", 0);
     }

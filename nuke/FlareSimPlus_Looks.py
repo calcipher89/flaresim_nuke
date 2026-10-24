@@ -120,6 +120,9 @@ LOOK_KNOBS = (
     'ring_arc',
     'ring_angle',
     'ring_tint',
+    'ring_streaks',
+    'ring_streak_count',
+    'ring_streak_width',
     'dirt_gain',
     'dirt_spread',
     'dirt_softness',
@@ -159,6 +162,9 @@ LATER_KNOB_DEFAULTS = {
     'ring_arc': 360.0,
     'ring_angle': -90.0,
     'ring_tint': [1.0, 1.0, 1.0],
+    'ring_streaks': 0.0,
+    'ring_streak_count': 120,
+    'ring_streak_width': 0.4,
 }
 
 # Per-surface override knobs (Surfaces tab) and their defaults.
@@ -177,13 +183,14 @@ GHOST_KNOB = 'ghost_overrides'
 GHOST_DEFAULT = {'on': True, 'gain': 1.0, 'color': (1.0, 1.0, 1.0),
                  'scale': 1.0, 'offx': 0.0, 'offy': 0.0,
                  # scale up (None = the same as across), own blur (None =
-                 # the node's Ghost Blur), streak (gain, length, thickness)
-                 # with its colour.
+                 # the node's Ghost Blur), streak (gain, length, thickness,
+                 # edge) with its colour.
                  'scale_y': None, 'blur': None, 'streak': None,
                  'streak_color': (1.0, 1.0, 1.0)}
 # Streak length and thickness when the text leaves them out (as the node).
 STREAK_LENGTH = 0.15
 STREAK_THICKNESS = 0.001
+STREAK_EDGE = 2.0
 
 
 def _ghost_floats(text, count):
@@ -225,7 +232,8 @@ def parse_ghost_overrides(text):
                 continue
             colour_keys = ('color', 'colour', 'tint')
             streak_colour_keys = ('streak_color', 'streak_colour', 'streak_tint')
-            v = _ghost_floats(val, 3 if key in colour_keys + streak_colour_keys + ('streak',) else
+            v = _ghost_floats(val, 4 if key == 'streak' else
+                              3 if key in colour_keys + streak_colour_keys else
                               2 if key in ('offset', 'scale') else 1)
             if v is None:
                 ok = False
@@ -240,10 +248,12 @@ def parse_ghost_overrides(text):
                 g['offx'], g['offy'] = v
             elif key == 'blur' and len(v) == 1 and v[0] >= 0.0:
                 g['blur'] = v[0]
-            elif key == 'streak' and v[0] >= 0.0 and all(c > 0.0 for c in v[1:]):
+            elif (key == 'streak' and v[0] >= 0.0 and all(c > 0.0 for c in v[1:3])
+                  and (len(v) < 4 or 1.0 <= v[3] <= 64.0)):
                 g['streak'] = (v[0],
                                v[1] if len(v) > 1 else STREAK_LENGTH,
-                               v[2] if len(v) > 2 else STREAK_THICKNESS)
+                               v[2] if len(v) > 2 else STREAK_THICKNESS,
+                               v[3] if len(v) > 3 else STREAK_EDGE)
             elif key in streak_colour_keys and len(v) in (1, 3):
                 g['streak_color'] = tuple(max(c, 0.0) for c in (v * 3 if len(v) == 1 else v))
             else:
@@ -297,8 +307,10 @@ def format_ghost_overrides(ghosts):
         if g.get('blur') is not None:
             words.append('blur=' + _num6(g['blur']))
         if _has_streak(g):
-            gain, length, thick = g['streak']
-            words.append('streak=%s,%s,%s' % (_num(gain), _num6(length), _num6(thick)))
+            gain, length, thick = g['streak'][:3]
+            edge = g['streak'][3] if len(g['streak']) > 3 else STREAK_EDGE
+            words.append('streak=%s,%s,%s' % (_num(gain), _num6(length), _num6(thick))
+                         + (',' + _num(edge) if abs(edge - STREAK_EDGE) > 1e-6 else ''))
             colour = g.get('streak_color') or (1.0, 1.0, 1.0)
             if any(abs(c - 1.0) > 1e-6 for c in colour):
                 words.append('streak_color=' + ','.join(_num(c) for c in colour))

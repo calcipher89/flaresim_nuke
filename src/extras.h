@@ -92,6 +92,11 @@ struct ExtrasConfig
     float ring_arc         = 360.0f; // degrees of the ring drawn, 360 = all
     float ring_angle       = -90.0f; // middle of the arc drawn, degrees, 90 = up
     float ring_tint[3]     = { 1.0f, 1.0f, 1.0f };
+    // Ring Streaks: the ring broken into fine streaks pointing at the light,
+    // each streak carrying the ring's colours (seeded by rays_seed).
+    float ring_streaks      = 0.0f;  // 0 = a smooth ring, 1 = all streaks
+    int   ring_streak_count = 120;
+    float ring_streak_width = 0.4f;  // degrees
     int   aperture_blades  = 0;      // 0 = round (no spikes, Airy rings)
     float aperture_rotation = 0.0f;  // degrees
     int   max_starbursts   = 32;     // brightest lights that get spikes
@@ -105,7 +110,8 @@ struct GhostStreak
     float x[3], y[3];      // centre in each channel, buffer pixels (+y up)
     float peak[3];         // value on the line at its centre
     float length = 1.0f;   // pixels to fall to 1/e along the line
-    float sigma  = 1.0f;   // thickness (Gaussian sigma), pixels
+    float sigma  = 1.0f;   // thickness (Gaussian sigma at edge 2), pixels
+    float edge   = 2.0f;   // across: exp(-|dy / sigma|^edge / 2); 2 = Gaussian
 };
 
 // Where the lights are.  Lights are stored as angles (BrightPixel); these

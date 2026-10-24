@@ -20,12 +20,13 @@
 //     offset=x,y      shifts it, in the node's pixels, +y up
 //     blur=b          its own Ghost Blur (a fraction of the diagonal, as
 //                     the node's), in place of the node's: soft rims
-//     streak=g[,l[,t]]  a thin horizontal line through the ghost, as an
+//     streak=g[,l[,t[,e]]]  a thin horizontal line through the ghost, as an
 //                     anamorphic lens draws through its focused ghosts.
 //                     g: its light, as a share of the ghost's (1 = as much
 //                     light as the whole ghost, off-frame parts included); l: how far it reaches, t: its
 //                     thickness, both fractions of the diagonal (defaults
-//                     0.15 and 0.001)
+//                     0.15 and 0.001); e: its edge, 2 = soft (the default),
+//                     higher = a flat bar with sharp edges (8 is sharp)
 //     streak_color=r,g,b  colours the streak, on top of the ghost's colour
 //     off             leaves it out ("on" puts it back)
 //
@@ -47,6 +48,7 @@ namespace flaresim {
 // Defaults of the streak setting's optional values.
 constexpr float kStreakLength    = 0.15f;
 constexpr float kStreakThickness = 0.001f;
+constexpr float kStreakEdge      = 2.0f;
 
 struct GhostOverride
 {
@@ -61,6 +63,7 @@ struct GhostOverride
     float streak = 0.0f;               // 0 = no streak
     float streak_length = kStreakLength;        // fraction of the diagonal
     float streak_thickness = kStreakThickness;  // fraction of the diagonal
+    float streak_edge = kStreakEdge;            // 2 = soft, higher = sharper
     float streak_col[3] = { 1.0f, 1.0f, 1.0f };
 
     float scale_up() const { return scale_y > 0.0f ? scale_y : scale; }
@@ -177,12 +180,14 @@ inline std::vector<GhostOverride> parse_ghost_overrides(const std::string& text,
                 ok = detail::read_floats(val, v, 1) == 1 && v[0] >= 0.0f;
                 if (ok) g.blur = v[0];
             } else if (key == "streak") {
-                const int n = detail::read_floats(val, v, 3);
-                ok = n >= 1 && v[0] >= 0.0f && (n < 2 || v[1] > 0.0f) && (n < 3 || v[2] > 0.0f);
+                const int n = detail::read_floats(val, v, 4);
+                ok = n >= 1 && v[0] >= 0.0f && (n < 2 || v[1] > 0.0f) && (n < 3 || v[2] > 0.0f) &&
+                     (n < 4 || (v[3] >= 1.0f && v[3] <= 64.0f));
                 if (ok) {
                     g.streak = v[0];
                     g.streak_length    = n >= 2 ? v[1] : kStreakLength;
                     g.streak_thickness = n >= 3 ? v[2] : kStreakThickness;
+                    g.streak_edge      = n >= 4 ? v[3] : kStreakEdge;
                 }
             } else if (key == "streak_color" || key == "streak_colour" || key == "streak_tint") {
                 const int n = detail::read_floats(val, v, 3);

@@ -35,6 +35,9 @@ struct ExtrasDetailKnobs
     float ring_arc        = 360.0f;
     float ring_angle      = -90.0f;
     float ring_tint[3]    = { 1.0f, 1.0f, 1.0f };
+    float ring_streaks      = 0.0f;
+    int   ring_streak_count = 120;
+    float ring_streak_width = 0.4f;
 
     // Knobs that follow the Haze and Starburst checkboxes.
     static const char* const* haze_names()
@@ -48,7 +51,7 @@ struct ExtrasDetailKnobs
             "starburst_reach", "rays_gain", "rays_count", "rays_length", "rays_width",
             "rays_spread", "rays_angle", "rays_seed", "rays_tint", "ring_gain", "ring_radius",
             "ring_aspect", "ring_width", "ring_rainbow", "ring_arc", "ring_angle", "ring_tint",
-            nullptr };
+            "ring_streaks", "ring_streak_count", "ring_streak_width", nullptr };
         return n;
     }
 
@@ -135,6 +138,17 @@ struct ExtrasDetailKnobs
                    "-90 = below.  Only matters when Ring Arc is under 360.");
         adv.add(f, Color_knob(f, ring_tint, "ring_tint", "Ring Tint"));
         Tooltip(f, "Colours the ring, on top of the light's own colour.");
+        adv.add(f, Float_knob(f, &ring_streaks, "ring_streaks", "Ring Streaks"));
+        SetRange(f, 0.0, 1.0);
+        Tooltip(f, "Breaks the ring into fine streaks pointing at the light, each with the "
+                   "ring's colours, as some anamorphic lenses draw it.  0 = a smooth ring, "
+                   "1 = only streaks.  The ring keeps its overall brightness.  Rays Seed "
+                   "picks another set.");
+        adv.add(f, Int_knob(f, &ring_streak_count, "ring_streak_count", "Ring Streak Count"));
+        Tooltip(f, "How many streaks go round the whole ring.");
+        adv.add(f, Float_knob(f, &ring_streak_width, "ring_streak_width", "Ring Streak Width"));
+        SetRange(f, 0.05, 3.0);
+        Tooltip(f, "Width of the streaks, in degrees round the ring.");
     }
 
     // starburst_on: the Starburst checkbox (Rays and Ring follow it).
@@ -157,6 +171,9 @@ struct ExtrasDetailKnobs
         xc.ring_rainbow    = ring_rainbow;
         xc.ring_arc        = ring_arc;
         xc.ring_angle      = ring_angle;
+        xc.ring_streaks      = ring_streaks;
+        xc.ring_streak_count = ring_streak_count;
+        xc.ring_streak_width = ring_streak_width;
         for (int c = 0; c < 3; ++c) { xc.rays_tint[c] = rays_tint[c]; xc.ring_tint[c] = ring_tint[c]; }
     }
 };

@@ -34,6 +34,7 @@ struct StreakGhost
     float gain = 0.0f;                // the streak's share of the ghost's light
     float length = 0.15f;             // fraction of the diagonal
     float thickness = 0.001f;         // fraction of the diagonal
+    float edge = 2.0f;                // 2 = soft (Gaussian), higher = a flat bar
     float tint[3] = { 1.0f, 1.0f, 1.0f };
 };
 
