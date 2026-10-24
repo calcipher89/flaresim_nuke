@@ -821,6 +821,17 @@ void FlareExtras::add_ghost_streak_row(int c, int y, int x0, int x1, float* dst)
                                        : 0.5f * std::pow(std::fabs(dy) / s.sigma, s.edge);
         if (g > 12.0f || s.peak[c] <= 0.0f) continue;
         const float v = s.peak[c] * std::exp(-g);
+        if (s.edge != 2.0f) {
+            // exp(-|dx / length|^(edge / 2)): flat along the middle with
+            // sharp ends, out to where it is under exp(-12).
+            const float q = 0.5f * s.edge;
+            const float reach = s.length * std::pow(12.0f, 1.0f / q);
+            const int a = std::max(x0, (int)std::floor(s.x[c] - reach));
+            const int b = std::min(x1, (int)std::ceil(s.x[c] + reach));
+            for (int x = a; x < b; ++x)
+                dst[x - x0] += v * std::exp(-std::pow(std::fabs(x + 0.5f - s.x[c]) / s.length, q));
+            continue;
+        }
         // exp(-|dx| / length), out to 12 lengths, stepped by a constant
         // factor from the centre outwards.
         const float reach = 12.0f * s.length;

@@ -146,11 +146,12 @@ std::vector<GhostStreak> trace_ghost_streaks(const LensSystem& lens,
             s.length = std::max(g.length, 1e-4f) * diag;
             s.sigma  = std::max(g.thickness * diag, 0.5f);
             s.edge   = std::clamp(g.edge, 1.0f, 64.0f);
-            // A line exp(-|dx| / length) across and exp(-|dy / sigma|^e / 2)
-            // up holds 2 length x 2^(1 + 1/e) gamma(1 + 1/e) sigma times its
-            // peak (sqrt(2 pi) sigma at e = 2, a Gaussian).
+            // A line exp(-|dx / length|^(e/2)) along and exp(-|dy / sigma|^e / 2)
+            // up holds 2 gamma(1 + 2/e) length x 2^(1 + 1/e) gamma(1 + 1/e)
+            // sigma times its peak (2 length x sqrt(2 pi) sigma at e = 2).
+            const float along  = 2.0f * std::tgamma(1.0f + 2.0f / s.edge);
             const float across = std::pow(2.0f, 1.0f + 1.0f / s.edge) * std::tgamma(1.0f + 1.0f / s.edge);
-            const float spread = 2.0f * s.length * across * s.sigma;
+            const float spread = along * s.length * across * s.sigma;
             // The ghost's light and centre in each channel, as the render
             // adds them up.
             double sum[3], sx[3], sy[3], ray_weight = 0.0;

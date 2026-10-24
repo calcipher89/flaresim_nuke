@@ -26,7 +26,8 @@
 //                     light as the whole ghost, off-frame parts included); l: how far it reaches, t: its
 //                     thickness, both fractions of the diagonal (defaults
 //                     0.15 and 0.001); e: its edge, 2 = soft (the default),
-//                     higher = a flat bar with sharp edges (8 is sharp)
+//                     higher = a flat bar with sharp edges and ends (8 is
+//                     sharp); it keeps the streak's light
 //     streak_color=r,g,b  colours the streak, on top of the ghost's colour
 //     off             leaves it out ("on" puts it back)
 //

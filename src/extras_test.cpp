@@ -365,6 +365,8 @@ int main(int argc, char** argv)
         check(bar3[300] > 0.95f * bar0[300] && bar3[300] > soft3[300] * 1.1f, "Streak Edge: flat across the middle",
               bar3[300] / bar0[300]);
         check(bar6[300] < 0.2f * soft6[300], "Streak Edge: sharp edge", bar6[300] / soft6[300]);
+        check(bar0[350] > 0.9f * bar0[300] && bar0[450] < 0.02f * bar0[300],
+              "Streak Edge: flat along, with sharp ends", bar0[450] / bar0[300]);
         st.edge = 2.0f; st.sigma = 1.5f;
         fx.clear();
         check(!fx.has_ghost_streaks(), "clear drops the ghost streaks", 0);

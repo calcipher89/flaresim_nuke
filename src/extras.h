@@ -111,7 +111,9 @@ struct GhostStreak
     float peak[3];         // value on the line at its centre
     float length = 1.0f;   // pixels to fall to 1/e along the line
     float sigma  = 1.0f;   // thickness (Gaussian sigma at edge 2), pixels
-    float edge   = 2.0f;   // across: exp(-|dy / sigma|^edge / 2); 2 = Gaussian
+    float edge   = 2.0f;   // across exp(-|dy / sigma|^edge / 2), along
+                           // exp(-|dx / length|^(edge / 2)): 2 = Gaussian and
+                           // exponential, higher = a flat bar with sharp ends
 };
 
 // Where the lights are.  Lights are stored as angles (BrightPixel); these
