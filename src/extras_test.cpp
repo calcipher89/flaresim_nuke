@@ -144,6 +144,23 @@ int main(int argc, char** argv)
         check(wide_total / soft_total > 0.9 && wide_total / soft_total < 1.1,
               "Haze Aspect keeps about the same total", wide_total / soft_total);
         cfg.haze_aspect = 1.0f;
+
+        // Haze Core Tint colours the tighter glows only: none at Shape 0,
+        // more near the light than in the tail at Shape 1.
+        for (int c = 0; c < 3; ++c) cfg.haze_core_tint[c] = c == 0 ? 2.0f : 1.0f;
+        fx.compute(cfg, fr, lights);
+        check(std::fabs(total(fx, 0, w, h, true) / soft_total - 1.0) < 1e-3,
+              "Haze Core Tint: no effect at Haze Shape 0", total(fx, 0, w, h, true) / soft_total);
+        cfg.haze_shape = 1.0f;
+        fx.compute(cfg, fr, lights);
+        std::vector<float> cr(w, 0.0f), cg(w, 0.0f);
+        fx.add_haze_row(0, h / 2, 0, w, cr.data());
+        fx.add_haze_row(1, h / 2, 0, w, cg.data());
+        const float near_ratio = cr[w / 2 + 5] / cg[w / 2 + 5], far_ratio = cr[w / 2 + 250] / cg[w / 2 + 250];
+        check(near_ratio > 1.6f && near_ratio < 2.0f, "Haze Core Tint colours the haze near the light", near_ratio);
+        check(far_ratio < near_ratio && far_ratio < 1.4f, "Haze Core Tint leaves the tail mostly alone", far_ratio);
+        cfg.haze_shape = 0.0f;
+        for (int c = 0; c < 3; ++c) cfg.haze_core_tint[c] = 1.0f;
     }
 
     // Starburst with a six-blade iris.

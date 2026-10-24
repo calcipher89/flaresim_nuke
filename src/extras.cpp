@@ -236,6 +236,7 @@ void FlareExtras::compute(const ExtrasConfig& cfg, const ExtrasFrame& frame,
             field[i]->compute(cfg.haze_gain * share[i], radius[i], cfg.haze_passes,
                               kRefRadius, kRefPeak, frame, lights, cfg.haze_aspect);
             field[i]->tint(cfg.haze_tint);
+            if (i > 0) field[i]->tint(cfg.haze_core_tint);
         }
     }
     if (cfg.dirt_gain > 0.0f)

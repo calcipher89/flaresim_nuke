@@ -59,6 +59,9 @@ struct ExtrasConfig
     // Width over height of the haze: 1 = round, 2 = twice as wide as tall
     // (the oval glow of an anamorphic lens).  Its area stays the same.
     float haze_aspect      = 1.0f;
+    // Colours only the tighter glows of Haze Shape, on top of Haze Tint, so
+    // the haze near the light can be warmer or cooler than its wide tail.
+    float haze_core_tint[3] = { 1.0f, 1.0f, 1.0f };
     float starburst_gain   = 0.0f;   // 0 = off
     float starburst_scale  = 0.15f;  // spike length, fraction of the diagonal
     float starburst_tint[3] = { 1.0f, 1.0f, 1.0f };

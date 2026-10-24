@@ -17,6 +17,7 @@ namespace flaresim {
 struct ExtrasDetailKnobs
 {
     float haze_aspect     = 1.0f;
+    float haze_core_tint[3] = { 1.0f, 1.0f, 1.0f };
     float starburst_reach = 0.0f;
     float rays_gain       = 0.0f;
     int   rays_count      = 48;
@@ -38,7 +39,7 @@ struct ExtrasDetailKnobs
     // Knobs that follow the Haze and Starburst checkboxes.
     static const char* const* haze_names()
     {
-        static const char* const n[] = { "haze_aspect", nullptr };
+        static const char* const n[] = { "haze_aspect", "haze_core_tint", nullptr };
         return n;
     }
     static const char* const* starburst_names()
@@ -59,6 +60,11 @@ struct ExtrasDetailKnobs
         SetRange(f, 0.25, 4.0);
         Tooltip(f, "Width over height of the haze.  1 = round; 2 = twice as wide as it is "
                    "tall, the oval glow of an anamorphic lens.  The haze keeps its light.");
+        adv.add(f, Color_knob(f, haze_core_tint, "haze_core_tint", "Haze Core Tint"));
+        Tooltip(f, "Colours the haze close to the light, on top of Haze Tint: the tighter "
+                   "glows Haze Shape adds.  The wide tail keeps Haze Tint alone.  Many "
+                   "lenses glow warmer near the light than in the tail.  No effect at "
+                   "Haze Shape 0.");
     }
 
     // After Starburst Softness.
@@ -135,6 +141,7 @@ struct ExtrasDetailKnobs
     void apply(ExtrasConfig& xc, bool starburst_on) const
     {
         xc.haze_aspect     = haze_aspect;
+        for (int c = 0; c < 3; ++c) xc.haze_core_tint[c] = haze_core_tint[c];
         xc.starburst_reach = starburst_reach;
         xc.rays_gain       = starburst_on ? rays_gain : 0.0f;
         xc.rays_count      = rays_count;
