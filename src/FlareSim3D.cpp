@@ -40,6 +40,8 @@
 #include "ghost_cuda.h"
 #include "blur_cuda.h"
 #include "extras.h"
+#include "extras_knobs.h"
+#include "ghost_streaks.h"
 #include "layers.h"
 #include "trace_log.h"
 
@@ -222,6 +224,7 @@ public:
     // The image on the dirt input, while Lens Dirt is on.
     Iop* dirt_input() const
     { return dirt_enable_ ? dynamic_cast<Iop*>(Op::input(kDirtInput)) : nullptr; }
+    flaresim::ExtrasDetailKnobs detail_;   // Haze Aspect, Starburst Reach, Rays, Ring
     flaresim::FlareExtras extras_;
 
     int         pupil_jitter_;
@@ -276,6 +279,9 @@ public:
     std::vector<float> pair_colors_;
     std::vector<float> pair_offsets_;
     std::vector<float> pair_scales_;
+    std::vector<float> pair_scales_y_; // up
+    std::vector<int>   pair_blur_px_;  // own blur radius, -1 = Ghost Blur
+    std::vector<flaresim::StreakGhost> streak_ghosts_;   // Ghost Overrides streaks
 
     uint16_t* ghost_r_  = nullptr;
     uint16_t* ghost_g_  = nullptr;
@@ -736,6 +742,7 @@ public:
         adv_.add(f, Color_knob(f, haze_tint_, "haze_tint", "Haze Tint"));
         Tooltip(f, "Colours the haze, on top of the light's own colour.  "
                    "Coated lenses often give a warm or a cool veil.");
+        detail_.haze_knobs(f, adv_);
 
         Divider(f, "Starburst");
         Bool_knob(f, &starburst_enable_, "starburst_enable", "Starburst");
@@ -766,6 +773,7 @@ public:
         Tooltip(f, "Softens and widens the spikes (a blur, as a fraction of "
                    "their length).  0 = crisp; 0.005 to 0.02 for the softer "
                    "spikes of an older or hazier lens.");
+        detail_.starburst_knobs(f, adv_);
 
         Divider(f, "Lens Dirt");
         Bool_knob(f, &dirt_enable_, "dirt_enable", "Lens Dirt");
@@ -894,9 +902,13 @@ public:
             if (Knob* x = knob("res_ref_width")) x->enable(res_independent_);
             for (const char* name : { "haze_gain", "haze_radius", "haze_passes", "haze_shape", "haze_tint" })
                 if (Knob* x = knob(name)) x->enable(haze_enable_);
+            for (const char* const* n = flaresim::ExtrasDetailKnobs::haze_names(); *n; ++n)
+                if (Knob* x = knob(*n)) x->enable(haze_enable_);
             for (const char* name : { "starburst_gain", "starburst_scale", "starburst_tint",
                                       "starburst_fringe", "starburst_softness" })
                 if (Knob* x = knob(name)) x->enable(starburst_enable_);
+            for (const char* const* n = flaresim::ExtrasDetailKnobs::starburst_names(); *n; ++n)
+                if (Knob* x = knob(*n)) x->enable(starburst_enable_);
             for (const char* name : { "dirt_gain", "dirt_spread", "dirt_softness",
                                       "dirt_scatter", "dirt_ghosts" })
                 if (Knob* x = knob(name)) x->enable(dirt_enable_);
@@ -1367,6 +1379,7 @@ public:
                 xc.haze_tint[c]      = haze_tint_[c];
                 xc.starburst_tint[c] = starburst_tint_[c];
             }
+            detail_.apply(xc, starburst_enable_);
             xc.dirt_gain         = dirt_input() ? dirt_gain_ : 0.0f;
             xc.dirt_spread       = dirt_spread_;
             xc.aperture_blades   = aperture_blades_;
@@ -1478,7 +1491,9 @@ public:
 
         // Apply per-surface toggles and gains
         {
-            std::vector<GhostPair> ep; std::vector<float> eb, ec, eo, es;
+            std::vector<GhostPair> ep; std::vector<float> eb, ec, eo, es, esy;
+            std::vector<int> eblur;
+            streak_ghosts_.clear();
             ep.reserve(active_pairs.size());
             eb.reserve(active_pairs.size());
             ec.reserve(active_pairs.size() * 3);
@@ -1524,14 +1539,36 @@ public:
                 float sc = 1;
                 if (sa >= 0 && sa < MAX_SURFS_UI) sc *= surf_scale_[sa];
                 if (sb >= 0 && sb < MAX_SURFS_UI) sc *= surf_scale_[sb];
-                if (go) sc *= go->scale;
-                es.push_back(sc);
+                es.push_back(sc * (go ? go->scale : 1.0f));
+                esy.push_back(sc * (go ? go->scale_up() : 1.0f));
+
+                // Its own blur (Ghost Overrides), sized as Ghost Blur.
+                eblur.push_back(go && go->blur >= 0.0f && ghost_blur_passes_ > 0
+                                ? (int)std::round(go->blur * basis_diag) : -1);
+
+                // A streak through it (Ghost Overrides).
+                if (go && go->streak > 0.0f) {
+                    flaresim::StreakGhost sg;
+                    sg.pair  = active_pairs[i];
+                    sg.boost = eb.back();
+                    sg.col[0] = cr;  sg.col[1] = cg;  sg.col[2] = cb;
+                    sg.sx = es.back();  sg.sy = esy.back();
+                    sg.ox = ox;  sg.oy = oy;
+                    sg.gain = go->streak;
+                    sg.length = go->streak_length;
+                    sg.thickness = go->streak_thickness;
+                    sg.edge = go->streak_edge;
+                    for (int c = 0; c < 3; ++c) sg.tint[c] = go->streak_col[c];
+                    streak_ghosts_.push_back(sg);
+                }
             }
             active_pairs = std::move(ep);
             area_boosts  = std::move(eb);
             pair_colors_  = std::move(ec);
             pair_offsets_ = std::move(eo);
             pair_scales_  = std::move(es);
+            pair_scales_y_ = std::move(esy);
+            pair_blur_px_  = std::move(eblur);
         }
 
         last_pair_count_.store((int)active_pairs.size());
@@ -1543,23 +1580,21 @@ public:
         const int fmt_x0_in_buf = pending_fmt_x0_ - x0;
         const int fmt_y0_in_buf = pending_fmt_y0_ - y0;
 
+        // Ghost Overrides streaks: lines through single ghosts, drawn
+        // with the extras (on the CPU).
+        if (!streak_ghosts_.empty()) {
+            PROF_BEGIN("ghost_streaks");
+            flaresim::StreakFrame sf;
+            sf.sensor_half_w = sensor_half_w;  sf.sensor_half_h = sensor_half_h;
+            sf.fmt_w = pending_fmt_w_;  sf.fmt_h = pending_fmt_h_;
+            sf.fmt_x0_in_buf = fmt_x0_in_buf;  sf.fmt_y0_in_buf = fmt_y0_in_buf;
+            sf.diag = basis_diag;
+            extras_.set_ghost_streaks(
+                flaresim::trace_ghost_streaks(lens_, streak_ghosts_, sources, cfg, sf));
+            PROF_END();
+        }
+
         PROF_BEGIN("gpu_ghost_render");
-        launch_ghost_cuda(lens_, active_pairs, area_boosts, sources,
-                          sensor_half_w, sensor_half_h,
-                          nullptr, nullptr, nullptr,
-                          w, h,
-                          pending_fmt_w_, pending_fmt_h_,
-                          fmt_x0_in_buf, fmt_y0_in_buf,
-                          cfg, gpu_cache_,
-                          /*skip_readback=*/true,
-                          &pending_cuda_error_,
-                          &pair_colors_, &pair_offsets_, &pair_scales_);
-        PROF_END();
-
-        // Cancelled during the GPU render: its output is incomplete.
-        if (Op::aborted()) { zero_buffers(); return; }
-
-        PROF_BEGIN("gpu_blur_alpha_readback");
         {
             int radius = 0;
             if (ghost_blur_ > 0.0f && ghost_blur_passes_ > 0) {
@@ -1567,14 +1602,19 @@ public:
                 // changing the overscan doesn't change the blur.
                 radius = std::max(1, (int)std::round(ghost_blur_ * basis_diag));
             }
-            launch_blur_alpha_readback_async(
+            const bool done = render_ghosts_cuda(
+                lens_, active_pairs, area_boosts, sources,
+                sensor_half_w, sensor_half_h, w, h,
+                pending_fmt_w_, pending_fmt_h_, fmt_x0_in_buf, fmt_y0_in_buf,
+                cfg, gpu_cache_, &pending_cuda_error_,
+                pair_colors_, pair_offsets_, pair_scales_, pair_scales_y_, &pair_blur_px_,
+                radius, ghost_blur_passes_,
                 reinterpret_cast<float*>(ghost_r_),
                 reinterpret_cast<float*>(ghost_g_),
                 reinterpret_cast<float*>(ghost_b_),
-                reinterpret_cast<float*>(alpha_),
-                w, h, radius, ghost_blur_passes_,
-                gpu_cache_, &pending_cuda_error_,
-                cfg.highlight_clip, cfg.highlight_knee, cfg.highlight_metric);
+                reinterpret_cast<float*>(alpha_));
+            // Cancelled during the GPU render: its output is incomplete.
+            if (!done || Op::aborted()) { zero_buffers(); return; }
         }
         PROF_END();
 

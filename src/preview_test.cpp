@@ -104,6 +104,31 @@ int main(int argc, char** argv)
     const int after = bp[0] + bp[1] + bp[2];
     std::printf("ghost gain 0.25: picked pixel %d -> %d\n", before, after);
     if (fsp_num_pairs(pv) != all_pairs || after >= before) return 1;
+    // A streak through the picked ghost lights its row far to the side;
+    // its own blur dims its brightest pixel.
+    {
+        auto light = [&]() {
+            long v = 0;
+            for (size_t i = 0; i < rgba.size(); i += 4) v += rgba[i] + rgba[i + 1] + rgba[i + 2];
+            return v;
+        };
+        fsp_set_ghost_overrides(pv, "", 1920.0f);
+        if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+        const long plain_light = light();
+        const int plain_peak = rgba[(size_t)best * 4] + rgba[(size_t)best * 4 + 1] + rgba[(size_t)best * 4 + 2];
+        std::snprintf(text, sizeof(text), "%d-%d streak=2,0.3", pa[0], pb[0]);
+        fsp_set_ghost_overrides(pv, text, 1920.0f);
+        if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+        const long streak_light = light();
+        std::printf("ghost streak: image light %ld -> %ld\n", plain_light, streak_light);
+        if (streak_light <= plain_light + plain_light / 50) return 1;
+        std::snprintf(text, sizeof(text), "%d-%d blur=0.03", pa[0], pb[0]);
+        fsp_set_ghost_overrides(pv, text, 1920.0f);
+        if (fsp_render(pv, &p, w, h, rgba.data()) < 0) return 1;
+        const int soft_peak = rgba[(size_t)best * 4] + rgba[(size_t)best * 4 + 1] + rgba[(size_t)best * 4 + 2];
+        std::printf("ghost blur: picked pixel %d -> %d\n", plain_peak, soft_peak);
+        if (soft_peak >= plain_peak || fsp_num_pairs(pv) != all_pairs) return 1;
+    }
     fsp_set_ghost_overrides(pv, nullptr, 0.0f);
 
     FspSurfaceInfo info;

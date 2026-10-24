@@ -7,6 +7,12 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 ### Added
 - Ghost Overrides: change one ghost on its own (gain, tint, scale, offset, or turn it off) on top of its two surfaces' settings, so matching one ghost no longer moves every other ghost off the same surfaces. Pick the ghost in the Lens Browser's Lens Elements tab, or type it on the node's Surfaces tab (`3-12 gain=2.5 color=1,0.6,0.9`). Saved in looks; older versions ignore it.
 - Haze Shape and Haze Tint: haze that is bright near the light with a long faint tail (same total light), and a colour for the veil. Starburst Tint, Fringe (colour fringing, 0 to 2) and Softness. All under Show Advanced and saved in looks; a look saved before them puts them back to their defaults, and older versions ignore them.
+- Finer controls for matching anamorphic references (all saved in looks; older versions ignore them):
+  - Ghost Overrides `streak=`: a thin horizontal line through one ghost, carrying a share of its light, as an anamorphic lens draws through small focused ghosts. `streak_color=` tints it.
+  - Ghost Overrides `blur=`: one ghost's own Ghost Blur, for soft rims; and `scale=x,y` to scale a ghost across and up separately.
+  - Haze Aspect (oval haze), Starburst Reach (long thin spikes, small core).
+  - Rays (random rays fanning out from the light) and Ring (a soft rainbow ring or arc) under Starburst.
+  - The Lens Browser's Pick a Ghost panel has Scale Up, Blur, Streak and Streak Length.
 - Resolution Independent (off by default): the flare looks the same at any plate size, as it does at Reference Width (default 1920). Fixes placed lights' ghosts dimming at 4K and Auto Detect haze, starburst and dirt brightening at 4K. Offsets are then in Reference Width pixels. Saved in looks.
 - Six Hawk-style 2x anamorphic lenses with matching looks, tuned against Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, small blue mirrored ghost) and Hawk APL style 30/50/100mm (pale streak, oval ghosts, starburst on the 50). Streak length, mirrored ghost, veil and colours measured from light-on minus light-off frames; irises set to the footage's stops. `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`. (#49)
 - `docs/FACILITY_INSTALL.md`: installing FlareSim+ for a whole facility, including split layouts with Python and plugin files in different folders. (#48)

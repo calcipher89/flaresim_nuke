@@ -44,6 +44,13 @@ struct GpuBufferCache
     void*       d_out_fp16       = nullptr;
     std::size_t d_out_fp16_elems = 0;   // capacity per channel in elements
 
+    // --- Ghosts with their own blur (Ghost Overrides "blur="), blurred
+    // group by group and summed here, then added to the rest ---
+    float*      d_soft_r    = nullptr;
+    float*      d_soft_g    = nullptr;
+    float*      d_soft_b    = nullptr;
+    std::size_t soft_floats = 0;
+
     // --- Box blur GPU ping-pong buffers ---
     float*      blur_a      = nullptr;
     float*      blur_b      = nullptr;
@@ -164,7 +171,24 @@ void launch_ghost_cuda(
     std::string*                    out_error = nullptr,
     const std::vector<float>*       pair_colors  = nullptr,  // 3 floats per pair (RGB), null = all white
     const std::vector<float>*       pair_offsets = nullptr,   // 2 floats per pair (XY px), null = no offset
-    const std::vector<float>*       pair_scales  = nullptr    // 1 float per pair, null = 1.0
+    const std::vector<float>*       pair_scales  = nullptr,   // 1 float per pair, null = 1.0
+    const std::vector<float>*       pair_scales_y = nullptr   // 1 float per pair (up), null = pair_scales
+);
+
+// Ghost Overrides "blur=": after launch_ghost_cuda() has drawn one group of
+// ghosts that share a blur radius (skip_readback = true), blur them by
+// that radius and add them to the soft ghosts (first = true starts the sum
+// afresh).  The drawn buffers are cleared, ready for the next group.
+// launch_blur_alpha_readback_async(..., add_soft = true) then adds the sum
+// to the rest after their own blur.
+void accumulate_soft_ghosts_cuda(
+    int             width,
+    int             height,
+    int             blur_radius,
+    int             blur_passes,
+    bool            first,
+    GpuBufferCache& cache,
+    std::string*    out_error = nullptr
 );
 
 // Compute alpha from GPU-resident RGB buffers:
@@ -213,7 +237,43 @@ void launch_blur_alpha_readback_async(
     std::string*    out_error = nullptr,
     float           highlight_clip = 0.0f,
     float           highlight_knee = 0.5f,
-    int             highlight_metric = 1
+    int             highlight_metric = 1,
+    bool            add_soft = false      // add the soft ghosts (accumulate_soft_ghosts_cuda)
+);
+
+// The node's whole ghost render: launch_ghost_cuda() then
+// launch_blur_alpha_readback_async(), with Ghost Overrides "blur=".  Pairs
+// whose pair_blur_px is >= 0 are drawn in groups, one per radius, each
+// blurred by its own radius; the rest get blur_radius.  pair_blur_px null
+// (or all < 0) is one plain render.  Returns false when config's stop
+// check asked to stop: the output is then incomplete.
+bool render_ghosts_cuda(
+    const LensSystem&               lens,
+    const std::vector<GhostPair>&   active_pairs,
+    const std::vector<float>&       pair_area_boosts,
+    const std::vector<BrightPixel>& sources,
+    float                           sensor_half_w,
+    float                           sensor_half_h,
+    int                             width,
+    int                             height,
+    int                             fmt_w,
+    int                             fmt_h,
+    int                             fmt_x0_in_buf,
+    int                             fmt_y0_in_buf,
+    const GhostConfig&              config,
+    GpuBufferCache&                 cache,
+    std::string*                    out_error,
+    const std::vector<float>&       pair_colors,
+    const std::vector<float>&       pair_offsets,
+    const std::vector<float>&       pair_scales,
+    const std::vector<float>&       pair_scales_y,
+    const std::vector<int>*         pair_blur_px,
+    int                             blur_radius,
+    int                             blur_passes,
+    float*                          cpu_r,      // FP16 pinned output, as
+    float*                          cpu_g,      // launch_blur_alpha_readback_async
+    float*                          cpu_b,
+    float*                          cpu_a
 );
 
 // FP32 variant — same pipeline but skips FP16 conversion.

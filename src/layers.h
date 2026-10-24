@@ -7,7 +7,7 @@
 // Layers on, the parts also come out on their own (haze, starburst and dirt
 // only while they are switched on):
 //
-//   flare.rgb      the ghosts
+//   flare.rgb      the ghosts (and their Ghost Overrides streaks)
 //   haze.rgb       the haze
 //   starburst.rgb  the starburst
 //   dirt.rgb       the lens dirt, lit by the lights (and ghosts)
@@ -96,8 +96,9 @@ struct DirtRow
     float ghost_gain = 0.0f;
 };
 
-// After the ghosts are in RGBA (and flare.rgb) of row [x, r): write
-// haze.rgb, starburst.rgb and dirt.rgb, and add them to RGB and alpha.
+// After the ghosts are in RGBA (and flare.rgb) of row [x, r): add the
+// ghosts' streaks to flare.rgb, write haze.rgb, starburst.rgb and
+// dirt.rgb, and add them all to RGB and alpha.
 //   buf_y   the row inside the node's buffer, or -1 when there's nothing
 //           cached for it (the layers are then black)
 //   x_off   buffer column 0 in image coordinates
@@ -136,6 +137,8 @@ inline void finish_row(const FlareExtras& fx, const LayerSet& on, int buf_y,
     }
 
     for (int c = 0; c < 3; ++c) {
+        if (on.flare && cached && fx.has_ghost_streaks() && channels.contains(l.flare[c]))
+            fx.add_ghost_streak_row(c, buf_y, bx0, bx1, row.writable(l.flare[c]) + x);
         if (on.haze && channels.contains(l.haze[c])) {
             float* dst = row.writable(l.haze[c]);
             std::fill(dst + x, dst + r, 0.0f);
@@ -161,6 +164,7 @@ inline void finish_row(const FlareExtras& fx, const LayerSet& on, int buf_y,
         extra[c].assign(n, 0.0f);
         fx.add_haze_row(c, buf_y, bx0, bx1, extra[c].data());
         fx.add_starburst_row(c, buf_y, bx0, bx1, extra[c].data());
+        fx.add_ghost_streak_row(c, buf_y, bx0, bx1, extra[c].data());
         if (lit_dirt)
             for (int i = 0; i < n; ++i) extra[c][i] += dirt_px[c][i];
         if (channels.contains(rgb[c])) {
