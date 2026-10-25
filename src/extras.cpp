@@ -768,56 +768,54 @@ void FlareExtras::compute_ring(const ExtrasConfig& cfg, const ExtrasFrame& f,
         mean /= std::max(wsum, 1e-12);
         for (float& v : streak_tab) v = (1.0f - streaks) + streaks * (float)(v / std::max(mean, 1e-12));
     }
-    // Ring Jitter: each colour's ring radius moves by smooth noise round the
-    // ring, one random value per cell (about one per streak), eased between.
-    const float jitter = std::max(cfg.ring_jitter, 0.0f) * width;
-    std::vector<float> jitter_tab[3];
-    if (jitter > 0.0f) {
-        const int cells = std::clamp(cfg.ring_streak_count, 8, 2000);
-        for (int c = 0; c < 3; ++c) {
-            std::vector<float> knot(cells);
-            for (int k = 0; k < cells; ++k)
-                knot[k] = 2.0f * ray_hash((uint32_t)cfg.rays_seed * 4813u + (uint32_t)(k * 3 + c) + 0x5bd1u)
-                          / 4294967296.0f - 1.0f;
-            jitter_tab[c].resize(kStreakBins);
-            for (int j = 0; j < kStreakBins; ++j) {
-                const float x = (j + 0.5f) / kStreakBins * cells;
-                const int k0 = (int)std::floor(x);
-                const float t = x - k0, e = t * t * (3.0f - 2.0f * t);
-                jitter_tab[c][j] = jitter * (knot[k0 % cells] * (1.0f - e) + knot[(k0 + 1) % cells] * e);
-            }
-        }
-    }
-    const float outer_j = outer + 2.0f * jitter;
+    // Ring Jitter: soft noise over the ring, the same in every colour so the
+    // patches take the ring's rainbow.  Smooth value noise in two octaves,
+    // cells Ring Jitter Size of the radius, mean about 1.
+    const float jitter = std::max(cfg.ring_jitter, 0.0f);
+    const float cell = std::max(cfg.ring_jitter_size, 0.005f) * radius;
+    const uint32_t jseed = (uint32_t)cfg.rays_seed * 4813u + 0x5bd1u;
+    auto noise = [&](float x, float y, uint32_t salt) {
+        const int ix = (int)std::floor(x), iy = (int)std::floor(y);
+        const float tx = x - ix, ty = y - iy;
+        const float ex = tx * tx * (3.0f - 2.0f * tx), ey = ty * ty * (3.0f - 2.0f * ty);
+        auto at = [&](int i, int j) {
+            return ray_hash(jseed + salt + (uint32_t)i * 73856093u + (uint32_t)j * 19349663u) / 4294967296.0f;
+        };
+        const float a = at(ix, iy) + (at(ix + 1, iy) - at(ix, iy)) * ex;
+        const float b = at(ix, iy + 1) + (at(ix + 1, iy + 1) - at(ix, iy + 1)) * ex;
+        return a + (b - a) * ey;
+    };
     for (const LightPos& p : brightest(lights, f, kMaxRayLights)) {
         const float rgb[3] = { p.r * std::max(cfg.ring_tint[0], 0.0f),
                                p.g * std::max(cfg.ring_tint[1], 0.0f),
                                p.b * std::max(cfg.ring_tint[2], 0.0f) };
-        const int ox0 = std::max(0, (int)std::floor(p.x - rx * outer_j));
-        const int ox1 = std::min(w, (int)std::ceil(p.x + rx * outer_j) + 1);
-        const int oy0 = std::max(0, (int)std::floor(p.y - ry * outer_j));
-        const int oy1 = std::min(h, (int)std::ceil(p.y + ry * outer_j) + 1);
+        const int ox0 = std::max(0, (int)std::floor(p.x - rx * outer));
+        const int ox1 = std::min(w, (int)std::ceil(p.x + rx * outer) + 1);
+        const int oy0 = std::max(0, (int)std::floor(p.y - ry * outer));
+        const int oy1 = std::min(h, (int)std::ceil(p.y + ry * outer) + 1);
         for (int oy = oy0; oy < oy1; ++oy) {
             const float v = (oy + 0.5f - p.y) / ry;
             const size_t row = (size_t)oy * w;
             for (int ox = ox0; ox < ox1; ++ox) {
                 const float u = (ox + 0.5f - p.x) / rx;
                 const float rho = std::sqrt(u * u + v * v);
-                if (rho > outer_j) continue;
+                if (rho > outer) continue;
                 const float phi = std::atan2(v, u);
                 float m = arc_mask(phi, centre, cfg.ring_arc);
                 if (m <= 0.0f) continue;
-                int bin = 0;
-                if (!streak_tab.empty() || jitter > 0.0f) {
+                if (!streak_tab.empty()) {
                     // By the pixel's true angle from the light, so the streaks point at it.
                     float a = std::atan2(oy + 0.5f - p.y, ox + 0.5f - p.x);
                     if (a < 0.0f) a += 2.0f * (float)M_PI;
-                    bin = std::min((int)(a / (2.0f * (float)M_PI) * kStreakBins), kStreakBins - 1);
+                    m *= streak_tab[std::min((int)(a / (2.0f * (float)M_PI) * kStreakBins), kStreakBins - 1)];
                 }
-                if (!streak_tab.empty()) m *= streak_tab[bin];
+                if (jitter > 0.0f) {
+                    const float nx = (ox + 0.5f - p.x) / cell, ny = (oy + 0.5f - p.y) / cell;
+                    const float n = (2.0f * noise(nx, ny, 0u) + noise(2.0f * nx + 0.37f, 2.0f * ny + 0.61f, 0x2545u)) / 3.0f;
+                    m *= std::max(1.0f + jitter * (2.0f * n - 1.0f), 0.0f);
+                }
                 for (int c = 0; c < 3; ++c) {
-                    const float rc = jitter > 0.0f ? rad_ch[c] + jitter_tab[c][bin] : rad_ch[c];
-                    const float t = (rho - rc) / width;
+                    const float t = (rho - rad_ch[c]) / width;
                     if (t * t > 32.0f) continue;
                     star_[c][row + ox] += m * std::exp(-0.5f * t * t) * rgb[c]
                                         * cfg.ring_gain * kRingUnit;

@@ -331,11 +331,10 @@ int main(int argc, char** argv)
         check(std::fabs(s1 / s0 - 1.0) < 0.15, "Ring Streaks: keeps the ring's light", s1 / s0);
         cfg.ring_streaks = 0.0f;
 
-        // Ring Jitter: the colours move in and out round the ring, so red over
-        // green at one radius changes along the ring; the light stays.
-        auto ratio_spread = [&](double& total) {
+        // Ring Jitter: soft patches along the ring, every colour alike (the
+        // rainbow stays), and the ring keeps its light.
+        auto ring_stats = [&](double& total, float& spread, float& hue) {
             std::vector<float> r(w), g(w);
-            float lo = 1e9f, hi = 0.0f;
             total = 0.0;
             for (int y = 0; y < h; ++y) {
                 std::fill(g.begin(), g.end(), 0.0f); fx.add_starburst_row(1, y, 0, w, g.data());
@@ -343,21 +342,24 @@ int main(int argc, char** argv)
             }
             r.assign(w, 0.0f); g.assign(w, 0.0f);
             fx.add_starburst_row(0, yr, 0, w, r.data()); fx.add_starburst_row(1, yr, 0, w, g.data());
+            float lo = 1e9f, hi = 0.0f, qlo = 1e9f, qhi = 0.0f;
             for (int x = w / 2 - ry; x < w / 2 + ry; ++x) {
-                if (g[x] < 0.2f * best_r) continue;
-                lo = std::min(lo, r[x] / g[x]); hi = std::max(hi, r[x] / g[x]);
+                if (smooth[x] < 0.2f * best_r) continue;
+                lo = std::min(lo, g[x] / smooth[x]); hi = std::max(hi, g[x] / smooth[x]);
+                if (g[x] > 0.0f) { qlo = std::min(qlo, r[x] / g[x]); qhi = std::max(qhi, r[x] / g[x]); }
             }
-            return hi / std::max(lo, 1e-6f);
+            spread = hi / std::max(lo, 1e-6f); hue = qhi / std::max(qlo, 1e-6f);
         };
         fx.compute(cfg, fr, lights);
-        double j0 = 0.0, j1 = 0.0;
-        const float even = ratio_spread(j0);
+        double j0 = 0.0, j1 = 0.0; float sp0, sp1, hue0, hue1;
+        ring_stats(j0, sp0, hue0);
         cfg.ring_jitter = 1.0f;
-        cfg.ring_streak_count = 40;
+        cfg.ring_jitter_size = 0.1f;
         fx.compute(cfg, fr, lights);
-        const float jit = ratio_spread(j1);
-        check(jit > 1.5f * even, "Ring Jitter: colours drift round the ring", jit / even);
-        check(std::fabs(j1 / j0 - 1.0) < 0.1, "Ring Jitter: keeps the ring's light", j1 / j0);
+        ring_stats(j1, sp1, hue1);
+        check(sp1 > 2.0f * sp0, "Ring Jitter: soft patches along the ring", sp1 / sp0);
+        check(std::fabs(hue1 / hue0 - 1.0f) < 0.01f, "Ring Jitter: the rainbow's colours stay", hue1 / hue0);
+        check(std::fabs(j1 / j0 - 1.0) < 0.15, "Ring Jitter: keeps the ring's light", j1 / j0);
         cfg.ring_jitter = 0.0f;
         cfg.ring_gain = 0.0f;
     }

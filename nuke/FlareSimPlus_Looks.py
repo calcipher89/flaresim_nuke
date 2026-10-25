@@ -124,6 +124,7 @@ LOOK_KNOBS = (
     'ring_streak_count',
     'ring_streak_width',
     'ring_jitter',
+    'ring_jitter_size',
     'dirt_gain',
     'dirt_spread',
     'dirt_softness',
@@ -167,6 +168,7 @@ LATER_KNOB_DEFAULTS = {
     'ring_streak_count': 120,
     'ring_streak_width': 0.4,
     'ring_jitter': 0.0,
+    'ring_jitter_size': 0.1,
 }
 
 # Per-surface override knobs (Surfaces tab) and their defaults.

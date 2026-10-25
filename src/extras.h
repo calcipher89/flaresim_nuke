@@ -97,10 +97,10 @@ struct ExtrasConfig
     float ring_streaks      = 0.0f;  // 0 = a smooth ring, 1 = all streaks
     int   ring_streak_count = 120;
     float ring_streak_width = 0.4f;  // degrees
-    // Ring Jitter: spectral noise round the ring.  Each colour's ring moves
-    // in and out by its own smooth random amount, so the rainbow's colours
-    // drift and break up along the ring (in ring widths; seeded by rays_seed).
+    // Ring Jitter: soft noise over the ring, in the ring's own rainbow
+    // colours (0 = an even ring, 1 = patches from dark to twice as bright).
     float ring_jitter       = 0.0f;
+    float ring_jitter_size  = 0.1f;  // noise patch size, fraction of the ring radius
     int   aperture_blades  = 0;      // 0 = round (no spikes, Airy rings)
     float aperture_rotation = 0.0f;  // degrees
     int   max_starbursts   = 32;     // brightest lights that get spikes
