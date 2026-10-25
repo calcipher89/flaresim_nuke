@@ -1,147 +1,163 @@
 {
-  "flaresim_look_version": 1,
-  "name": "Hawk APL style 30mm 2x",
-  "description": "Hawk APL style 2x anamorphic: long cool-blue streak and a soft glow. Tuned against reference footage of the real lens at f/2.8; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
-  "lens": "anamorphic/Hawk_APL_Style_30mm_2x.lens",
-  "knobs": {
-    "flare_gain": 10.0,
-    "aperture_blades": 6,
-    "aperture_rotation": 20,
-    "spectral_samples": 3,
-    "spectral_jitter": true,
-    "ghost_blur": 0.0025,
-    "ghost_blur_passes": 3,
-    "haze_enable": true,
-    "haze_gain": 0.63,
-    "haze_radius": 0.15,
-    "starburst_enable": true,
-    "starburst_gain": 2000,
-    "starburst_scale": 0.3,
-    "surf_gain_0": 0.25,
-    "surf_color_0": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_1": 0.25,
-    "surf_color_1": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_2": 10.9913,
-    "surf_color_2": [
-      0.607,
-      1.0,
-      0.879
-    ],
-    "surf_gain_3": 10.9913,
-    "surf_color_3": [
-      0.607,
-      1.0,
-      0.879
-    ],
-    "surf_gain_4": 0.25,
-    "surf_color_4": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_5": 0.25,
-    "surf_color_5": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_6": 0.25,
-    "surf_color_6": [
-      1,
-      1,
-      1
-    ],
-    "surf_gain_7": 0.25,
-    "surf_color_7": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_8": 0.25,
-    "surf_color_8": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_9": 0.25,
-    "surf_color_9": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_10": 0.25,
-    "surf_color_10": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_11": 0.25,
-    "surf_color_11": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_12": 0.25,
-    "surf_color_12": [
-      1,
-      1,
-      1
-    ],
-    "surf_gain_13": 0.25,
-    "surf_color_13": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_14": 0.25,
-    "surf_color_14": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_15": 0.25,
-    "surf_color_15": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_16": 0.25,
-    "surf_color_16": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_17": 0.25,
-    "surf_color_17": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_18": 0.25,
-    "surf_color_18": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_19": 0.25,
-    "surf_color_19": [
-      1.0,
-      1.0,
-      0.999
-    ],
-    "surf_gain_20": 0.25,
-    "surf_color_20": [
-      1.0,
-      1.0,
-      0.999
-    ]
-  }
+ "flaresim_look_version": 1,
+ "name": "Hawk APL style 30mm 2x",
+ "description": "Hawk APL style 2x anamorphic: long cool-blue streak and a soft glow. Tuned against reference footage of the real lens at f/2.8; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint). v4: finer details matched to annotated references (thin streaks through small ghosts, per-ghost blur and stretch, oval haze). v4c: re-tuned ghosts calibrated to Nuke (gain/colour from Nuke box sums). v4s: haze near the light refitted (Haze Core Tint); small sharp blue dot (1-10).",
+ "lens": "anamorphic/Hawk_APL_Style_30mm_2x.lens",
+ "knobs": {
+  "flare_gain": 10.0,
+  "aperture_blades": 6,
+  "aperture_rotation": 20,
+  "spectral_samples": 3,
+  "spectral_jitter": true,
+  "ghost_blur": 0.0012,
+  "ghost_blur_passes": 3,
+  "haze_enable": true,
+  "haze_gain": 0.8078,
+  "haze_radius": 0.15,
+  "starburst_enable": true,
+  "starburst_gain": 100,
+  "starburst_scale": 0.3,
+  "surf_gain_0": 0.25,
+  "surf_color_0": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_1": 0.25,
+  "surf_color_1": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_2": 8.9294,
+  "surf_color_2": [
+   0.607,
+   1.0,
+   0.879
+  ],
+  "surf_gain_3": 8.9294,
+  "surf_color_3": [
+   0.607,
+   1.0,
+   0.879
+  ],
+  "surf_gain_4": 0.25,
+  "surf_color_4": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_5": 0.25,
+  "surf_color_5": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_6": 0.25,
+  "surf_color_6": [
+   0.9999567658265659,
+   1.0,
+   0.9991033970864693
+  ],
+  "surf_gain_7": 0.25,
+  "surf_color_7": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_8": 0.25,
+  "surf_color_8": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_9": 0.25,
+  "surf_color_9": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_10": 0.25,
+  "surf_color_10": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_11": 0.25,
+  "surf_color_11": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_12": 0.25,
+  "surf_color_12": [
+   0.9999567658265659,
+   1.0,
+   0.9991033970864693
+  ],
+  "surf_gain_13": 0.25,
+  "surf_color_13": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_14": 0.25,
+  "surf_color_14": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_15": 0.25,
+  "surf_color_15": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_16": 0.25,
+  "surf_color_16": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_17": 0.25,
+  "surf_color_17": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_18": 0.25,
+  "surf_color_18": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_19": 0.25,
+  "surf_color_19": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "surf_gain_20": 0.25,
+  "surf_color_20": [
+   1.0,
+   1.0,
+   0.999
+  ],
+  "haze_shape": 0.999,
+  "haze_tint": [
+   0.87,
+   0.93,
+   0.9
+  ],
+  "ghost_overrides": "1-10 gain=135.46 color=0.6729,1.0000,0.4944 scale=0.1892,0.1182 offset=-42.6,-68.6 blur=0.0004539\n2-3 gain=0.52 color=0.336,0.75,0.934 scale=1.35,0.6 offset=275.5,31.6 blur=0.0008\n4-5 gain=32800 color=1.0,0.94,0.445 scale=0.3232,0.286 offset=949.6,71.3 blur=0.01\n4-14 gain=1950 color=0.95,1.0,0.61 scale=0.18,0.245 offset=-859.7,-325.6 blur=0.01\n4-16 gain=2200 color=0.7,1.0,0.53 scale=0.61,0.93 offset=874.2,-321.7 blur=0.01\n6-7 gain=3400 color=0.68,1.0,0.57 scale=0.23,0.49 offset=-874.8,323.9 blur=0.01\n8-9 gain=90455 color=0.0000,1.0000,0.4781 scale=0.05128,0.5073 offset=80.4,312.8 blur=0.01\n9-10 gain=732.35 color=0.5352,1.0000,0.9846 scale=0.3309,0.08742 offset=29.4,-86.3 blur=0.004\n9-16 gain=0.12824 color=0.15,0.6,1.0 scale=0.05,0.05 offset=505,76.6 streak=9000,0.3,0.001,4\n9-19 gain=29700 color=0.69,1.0,0.33 scale=0.06,0.18 offset=884.6,329 blur=0.01\n17-19 gain=103700 color=0.564,1.0,0.086 scale=0.5732,0.777 offset=-985.2,20.4 blur=0.01",
+  "haze_aspect": 2.0,
+  "res_independent": true,
+  "res_ref_width": 1920.0,
+  "haze_core_tint": [
+   1.857,
+   1.455,
+   0.928
+  ],
+  "starburst_softness": 0.02
+ }
 }

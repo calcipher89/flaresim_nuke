@@ -124,3 +124,39 @@ logged to `~/.nuke/FlareSim/logs/FlareSim_<host>.log`.
 3. The Lens Browser from an artist account that never had a personal install (clean home).
 4. An older script with FlareSim+ nodes: the lens is still found.
 5. A script with original FlareSim nodes: Help > FlareSim+ > Convert FlareSim Nodes, then render.
+
+## 6. A beta next to the release
+
+A beta build (`FlareSimPlusBeta_v<ver>_Nuke<nv>_<os>.zip`, made with `--edition Beta`) has its
+own names for everything Nuke loads, so it can sit on the plugin path next to the deployed
+release without replacing it:
+
+| | Release | Beta |
+|---|---|---|
+| Nodes | `FlareSimPlus`, `FlareSimPlus3D` | `FlareSimPlusBeta`, `FlareSimPlusBeta3D` |
+| Plugin files | `FlareSimPlus.so`, `FlareSimPlus3D.so` | `FlareSimPlusBeta.so`, `FlareSimPlusBeta3D.so` |
+| Python | `FlareSimPlus_*.py` | `FlareSimPlusBeta_*.py` |
+| Menus | Filter > FlareSim+, Help > FlareSim+ | Filter > FlareSim+ Beta, Help > FlareSim+ Beta |
+
+Install it to its own folder, e.g. `/software/apps/flareSimPlus/1.6.0-beta1/nuke/` (one folder
+or split, as in section 1), and add that folder to `NUKE_PATH` only for the testers, for
+example in the Nuke wrapper:
+
+```
+if ( $?FLARESIM_BETA ) then
+    setenv NUKE_PATH /software/apps/flareSimPlus/1.6.0-beta1/nuke:${NUKE_PATH}
+endif
+```
+
+Artists without it get the release alone. Testers get both: existing scripts keep their
+release nodes, new beta nodes come from Filter > FlareSim+ Beta, and Help > FlareSim+ Beta >
+Convert FlareSim Nodes turns selected release (or original FlareSim) nodes into beta nodes.
+Each install uses its own preview library, `lenses/` and `looks/`. Personal data in
+`~/.nuke/FlareSim` (looks, imported lenses, logs, caches) is shared by both.
+
+Tell testers: a script saved with beta nodes needs the beta to open (on the farm too). Without
+it Nuke reports unknown FlareSimPlusBeta nodes. Farm jobs from testers need `FLARESIM_BETA` (or
+the beta folder on `NUKE_PATH`) in the job environment.
+
+To check which is loaded: the beta's panel header has an orange BETA badge, and
+Help > FlareSim+ Beta > Self Test tests the beta.

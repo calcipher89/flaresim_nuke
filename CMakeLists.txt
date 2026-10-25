@@ -13,6 +13,10 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Options:
 #   FLARESIM_BUILD_PLUGINS  (ON)  build the FlareSimPlus + FlareSimPlus3D nodes for Nuke
 #   FLARESIM_BUILD_TESTS    (ON)  build the CPU-only optics smoke test
+#   FLARESIM_EDITION        ("")  side-by-side build, e.g. Beta: nodes FlareSimPlusBeta +
+#                                 FlareSimPlusBeta3D, Python FlareSimPlusBeta_*.py,
+#                                 labelled "FlareSim+ Beta" (src/edition.h,
+#                                 scripts/make_edition.py; needs python3)
 #
 # The flaresim_preview library (live preview in the Lens Browser window) is
 # CPU-only and is built in every configuration.
@@ -27,6 +31,10 @@ cmake_policy(SET CMP0091 NEW)
 
 option(FLARESIM_BUILD_PLUGINS "Build the FlareSim Nuke plugins" ON)
 option(FLARESIM_BUILD_TESTS   "Build the CPU-only optics smoke test" ON)
+set(FLARESIM_EDITION "" CACHE STRING "Side-by-side edition name added to the node classes, e.g. Beta (empty = regular FlareSim+)")
+if(FLARESIM_EDITION AND NOT FLARESIM_EDITION MATCHES "^[A-Z][A-Za-z0-9]*$")
+    message(FATAL_ERROR "FLARESIM_EDITION must be a capitalised word such as Beta, not '${FLARESIM_EDITION}'")
+endif()
 
 if(APPLE)
     # macOS deployment target + architecture must be set before project().
@@ -77,6 +85,7 @@ set(FLARESIM_CORE_SOURCES
     src/ghost.cpp
     src/lens_path.cpp
     src/extras.cpp
+    src/ghost_streaks.cpp
 )
 
 # ===========================================================================
@@ -353,8 +362,17 @@ else()
 endif()
 
 # Plugin file names must match the Nuke node class names, with no "lib" prefix.
+# An edition build puts its name after FlareSimPlus: FlareSimPlusBeta(3D).
+if(FLARESIM_EDITION)
+    set(_edition_label " ${FLARESIM_EDITION}")
+else()
+    set(_edition_label "")
+endif()
 foreach(_tgt ${FLARESIM_TARGETS})
-    set_target_properties(${_tgt} PROPERTIES PREFIX "" OUTPUT_NAME "${_tgt}")
+    string(REPLACE "FlareSimPlus" "FlareSimPlus${FLARESIM_EDITION}" _out "${_tgt}")
+    set_target_properties(${_tgt} PROPERTIES PREFIX "" OUTPUT_NAME "${_out}")
+    target_compile_definitions(${_tgt} PRIVATE
+        FSP_EDITION="${FLARESIM_EDITION}" FSP_EDITION_LABEL="${_edition_label}")
 endforeach()
 
 # ===========================================================================
@@ -365,9 +383,27 @@ endforeach()
 install(TARGETS ${FLARESIM_TARGETS} flaresim_preview
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .)
-install(FILES nuke/menu.py nuke/FlareSimPlus_LensBrowser.py nuke/FlareSimPlus_Looks.py
-    nuke/FlareSimPlus_Header.py nuke/FlareSimPlus_SelfTest.py nuke/FlareSimPlus_Log.py
-    nuke/FlareSimPlus_Convert.py nuke/FlareSimPlus_Preview.py DESTINATION .)
+set(FLARESIM_PY_MODULES LensBrowser Looks Header SelfTest Log Convert Preview)
+if(FLARESIM_EDITION)
+    # The Python files with the edition's names, regenerated on every build.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(_edition_py "${CMAKE_BINARY_DIR}/edition_py")
+    add_custom_target(edition_py ALL
+        COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_edition.py"
+                "${FLARESIM_EDITION}" "${CMAKE_CURRENT_SOURCE_DIR}/nuke" "${_edition_py}"
+        COMMENT "Python files for FlareSim+ ${FLARESIM_EDITION}"
+        VERBATIM)
+    set(_py_files "${_edition_py}/menu.py")
+    foreach(_m ${FLARESIM_PY_MODULES})
+        list(APPEND _py_files "${_edition_py}/FlareSimPlus${FLARESIM_EDITION}_${_m}.py")
+    endforeach()
+else()
+    set(_py_files nuke/menu.py)
+    foreach(_m ${FLARESIM_PY_MODULES})
+        list(APPEND _py_files "nuke/FlareSimPlus_${_m}.py")
+    endforeach()
+endif()
+install(FILES ${_py_files} DESTINATION .)
 install(DIRECTORY nuke/icons/ DESTINATION icons
     FILES_MATCHING PATTERN "*.png")
 install(DIRECTORY looks/ DESTINATION looks
@@ -378,7 +414,7 @@ install(DIRECTORY lenses/ DESTINATION lenses
 message(STATUS "")
 message(STATUS "========================================")
 message(STATUS "FlareSim build configuration")
-message(STATUS "  Nodes        : ${FLARESIM_TARGETS}")
+message(STATUS "  Nodes        : FlareSimPlus${FLARESIM_EDITION} FlareSimPlus${FLARESIM_EDITION}3D")
 message(STATUS "  Nuke version : ${NUKE_VERSION}")
 message(STATUS "  NDK include  : ${NDK_ROOT}")
 message(STATUS "  Nuke libs    : ${NUKE_LIB_DIR}")

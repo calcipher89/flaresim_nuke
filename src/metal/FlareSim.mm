@@ -21,6 +21,7 @@
 #include "DDImage/ChannelSet.h"
 #include "DDImage/CameraOp.h"
 
+#include "edition.h"
 #include "lens.h"
 #include "lens_path.h"
 #include "occlusion.h"
@@ -392,7 +393,7 @@ public:
     }
 
     // ---- Nuke boilerplate ----
-    const char* Class()     const override { return "FlareSimPlus"; }
+    const char* Class()     const override { return FSP_CLASS_2D; }
     const char* node_help() const override
     {
         return "Physically-based lens flare simulation (ghost ray tracing).\n\nmacOS / Apple Silicon Metal compute backend.\n\n"
@@ -549,8 +550,8 @@ public:
         // settable from Python or the knob's expression.
         SetFlags(f, Knob::HIDDEN);
         Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
-        PyScript_knob(f, "import FlareSimPlus_LensBrowser\n"
-                         "FlareSimPlus_LensBrowser.show_for_node(nuke.thisNode())",
+        PyScript_knob(f, "import " FSP_MODULE("LensBrowser") "\n"
+                         FSP_MODULE("LensBrowser") ".show_for_node(nuke.thisNode())",
                       "lens_browser", "Lens Browser");
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
@@ -856,7 +857,7 @@ public:
 
         // ---- About tab ----
         Tab_knob(f, "About");
-        Text_knob(f, "FlareSim+\n"
+        Text_knob(f, FSP_LABEL "\n"
                      "\n"
                      "Physically-based lens flare simulation for Nuke.\n"
                      "\n"
@@ -1670,6 +1671,6 @@ public:
 static Iop* build(Node* node) { return new FlareSim(node); }
 
 const Iop::Description FlareSim::d(
-    "FlareSimPlus",
-    "Filter/FlareSim+",
+    FSP_CLASS_2D,
+    "Filter/" FSP_LABEL,
     build);

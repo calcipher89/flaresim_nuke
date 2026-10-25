@@ -1,7 +1,7 @@
 {
   "flaresim_look_version": 1,
   "name": "Hawk V-Lite style 110mm 2x",
-  "description": "Hawk V-Lite style 2x anamorphic: bright full-width white-blue streak, magenta veil, soft blue ghost below the light. Tuned against reference footage of the real lens at f/3; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
+  "description": "Hawk V-Lite style 2x anamorphic: bright full-width white-blue streak, magenta veil, soft blue ghost below the light. Tuned against reference footage of the real lens at f/3; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint). v4: finer details matched to annotated references (thin streaks through small ghosts, per-ghost blur and stretch, oval haze). v4c: re-tuned ghosts calibrated to Nuke (gain/colour from Nuke box sums). v4s: haze near the light refitted (Haze Core Tint); flatter, softer-edged dot (14-27). v4t: streak is a flat sharp-edged bar (streak edge 8), haze refit (radius 0.26) for a white core.",
   "lens": "anamorphic/Hawk_VLite_Style_110mm_2x.lens",
   "knobs": {
     "flare_gain": 10.0,
@@ -12,10 +12,10 @@
     "ghost_blur": 0.0025,
     "ghost_blur_passes": 3,
     "haze_enable": true,
-    "haze_gain": 0.4,
-    "haze_radius": 0.15,
+    "haze_gain": 0.7131,
+    "haze_radius": 0.26,
     "starburst_enable": true,
-    "starburst_gain": 3000,
+    "starburst_gain": 800,
     "starburst_scale": 0.3,
     "surf_gain_0": 0.7,
     "surf_color_0": [
@@ -198,6 +198,23 @@
       1,
       0.45,
       0.85
-    ]
+    ],
+    "haze_shape": 1.0,
+    "haze_tint": [
+      0.24,
+      1.0,
+      0.755
+    ],
+    "ghost_overrides": "0-5 off\n1-2 off\n2-5 gain=0.001079 color=1.000,0.811,0.555 offset=-478,-6 streak=409,0.36,0.00405,8 streak_color=0.714,0.569,1\n3-5 gain=0.0001 offset=580,0 streak=31000,0.12,0.005,8 streak_color=0.1,0.8,1\n6-17 gain=6476.8 color=0.7865,1.0000,0.5423 scale=0.494,0.30 offset=161,-168.6 blur=0.02\n8-10 gain=40.251 color=1.000,0.019,0.102\n8-20 gain=1.343 color=1.000,0.687,0.709\n11-27 gain=10851 color=0.4319,1.0000,0.3916 scale=0.655,0.316 offset=-350,-153.8 blur=0.03\n12-14 gain=15.841 color=0.1562,1.0000,0.4210 scale=0.05,0.05 offset=-11.5,-131.4 streak=100,0.45,0.005\n12-15 gain=40.251 color=1.000,0.019,0.102\n12-20 gain=40.251 color=1.000,0.019,0.102\n14-27 gain=85.137 color=0.2291,1.0000,0.5058 scale=0.01398,0.0126 offset=-163.6,-155.8 blur=0.002724\n15-20 gain=40.251 color=1.000,0.019,0.102\n20-22 gain=40.251 color=1.000,0.019,0.102\n20-25 gain=40.251 color=1.000,0.019,0.102\n4-5 gain=15 color=0.65,1,0.25 scale=5,2.5 offset=-536,-196.5 blur=0.005",
+    "haze_aspect": 1.5,
+    "res_independent": true,
+    "res_ref_width": 1920.0,
+    "haze_core_tint": [
+      5.186,
+      1.23,
+      0.967
+    ],
+    "starburst_softness": 0.006,
+    "starburst_fringe": 0.0
   }
 }

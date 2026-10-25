@@ -13,6 +13,7 @@
 #include "lens.h"
 #include "ghost.h"
 #include "ghost_overrides.h"
+#include "ghost_streaks.h"
 #include "trace.h"
 
 #include <algorithm>
@@ -222,7 +223,9 @@ struct PairStyle
     float gain = 1.0f;
     float col[3] = { 1.0f, 1.0f, 1.0f };
     float ox = 0.0f, oy = 0.0f;           // fraction of the image width
-    float scale = 1.0f;
+    float scale = 1.0f;                   // across
+    float scale_y = 1.0f;                 // up
+    const flaresim::GhostOverride* over = nullptr;   // its Ghost Override, if any
 };
 
 PairStyle pair_style(const Preview& pv, const GhostPair& pair)
@@ -240,6 +243,7 @@ PairStyle pair_style(const Preview& pv, const GhostPair& pair)
         st.ox    += f.offset_x;
         st.oy    += f.offset_y;
         st.scale *= f.scale;
+        st.scale_y *= f.scale;
     }
     if (const flaresim::GhostOverride* g =
             flaresim::find_ghost_override(pv.ghosts, pair.surf_a, pair.surf_b))
@@ -250,6 +254,8 @@ PairStyle pair_style(const Preview& pv, const GhostPair& pair)
         st.ox    += g->ox / pv.ghosts_ref_w;
         st.oy    += g->oy / pv.ghosts_ref_w;
         st.scale *= g->scale;
+        st.scale_y *= g->scale_up();
+        st.over   = g;
     }
     return st;
 }
@@ -330,8 +336,8 @@ float trace_mesh(const Preview& pv, const TraceSetup& ts, const GhostPair& pair,
         const float py = (tr.position.y / (2.0f * ts.shh) + 0.5f) * ts.h;
         // Same per-pair transform as the node: scale about the frame
         // centre, then offset.
-        hit.x = cx + (px - cx) * st.scale + st.ox * ts.w;
-        hit.y = cy + (py - cy) * st.scale + st.oy * ts.w;
+        hit.x = cx + (px - cx) * st.scale   + st.ox * ts.w;
+        hit.y = cy + (py - cy) * st.scale_y + st.oy * ts.w;
         hit.v = tr.weight * value_scale;
         hit.ok = std::isfinite(hit.x) && std::isfinite(hit.y) &&
                  std::fabs(hit.x) < 1e5f && std::fabs(hit.y) < 1e5f &&
@@ -360,19 +366,19 @@ float trace_mesh(const Preview& pv, const TraceSetup& ts, const GhostPair& pair,
 // CPU ghost render: the same ray setup as the node's CUDA kernel, with the
 // three classic wavelengths.  Each ghost's mesh is filled, so a defocused
 // ghost comes out as a smooth disc instead of a cloud of dots, even with a
-// small ray grid.  Pairs are split across threads.
+// small ray grid.  Pairs are split across threads.  Only the pairs marked
+// in `only` (when given) are drawn.
 void render_cpu(Preview& pv, const BrightPixel& src, const GhostConfig& cfg,
-                float shw, float shh, int w, int h)
+                float shw, float shh, int w, int h, const std::vector<char>* only = nullptr)
 {
     TraceSetup ts;
     if (!make_setup(pv, src, cfg, shw, shh, w, h, ts)) return;
 
     std::vector<PairStyle> styles(pv.pairs.size());
-    pv.enabled_pairs = 0;
     for (size_t pi = 0; pi < pv.pairs.size(); ++pi)
     {
         styles[pi] = pair_style(pv, pv.pairs[pi]);
-        pv.enabled_pairs += styles[pi].on;
+        if (only && !(*only)[pi]) styles[pi].on = false;
     }
 
     const int n_threads = std::max(1, std::min({ (int)std::thread::hardware_concurrency(),
@@ -722,20 +728,93 @@ FSP_API int fsp_render(void* handle, const FspParams* p,
     pv.b.assign(npx, 0.0f);
 
     const Optics o = make_optics(pv, p, w, h);
-    if (pv.lens_ok)
+    pv.enabled_pairs = 0;
+    if (pv.lens_ok && !pv.pairs.empty())
     {
-        if (!pv.pairs.empty())
-            render_cpu(pv, o.src, o.cfg, o.shw, o.shh, w, h);
-        else
-            pv.enabled_pairs = 0;
-
-        if (p->ghost_blur > 0.0f && p->ghost_blur_passes > 0)
+        // Each ghost's blur radius: Ghost Blur, or its own (Ghost
+        // Overrides "blur="), as the node sizes them.
+        const float diag = std::sqrt((float)w * w + (float)h * h);
+        const int passes = p->ghost_blur_passes;
+        const int node_radius = (p->ghost_blur > 0.0f && passes > 0)
+            ? std::max(1, (int)std::lround(p->ghost_blur * diag)) : 0;
+        std::vector<PairStyle> styles(pv.pairs.size());
+        std::vector<int> radius(pv.pairs.size(), node_radius), radii;
+        for (size_t pi = 0; pi < pv.pairs.size(); ++pi)
         {
-            const float diag   = std::sqrt((float)w * w + (float)h * h);
-            const int   radius = std::max(1, (int)std::lround(p->ghost_blur * diag));
-            box_blur(pv.r, pv.tmp, w, h, radius, p->ghost_blur_passes);
-            box_blur(pv.g, pv.tmp, w, h, radius, p->ghost_blur_passes);
-            box_blur(pv.b, pv.tmp, w, h, radius, p->ghost_blur_passes);
+            styles[pi] = pair_style(pv, pv.pairs[pi]);
+            pv.enabled_pairs += styles[pi].on;
+            if (styles[pi].over && styles[pi].over->blur >= 0.0f && passes > 0)
+                radius[pi] = (int)std::lround(styles[pi].over->blur * diag);
+            if (std::find(radii.begin(), radii.end(), radius[pi]) == radii.end())
+                radii.push_back(radius[pi]);
+        }
+
+        // One render per radius, each blurred on its own.
+        std::vector<float> sum[3];
+        for (int r : radii)
+        {
+            std::vector<char> only(pv.pairs.size());
+            for (size_t pi = 0; pi < pv.pairs.size(); ++pi) only[pi] = radius[pi] == r;
+            if (radii.size() > 1)
+            {
+                std::fill(pv.r.begin(), pv.r.end(), 0.0f);
+                std::fill(pv.g.begin(), pv.g.end(), 0.0f);
+                std::fill(pv.b.begin(), pv.b.end(), 0.0f);
+            }
+            render_cpu(pv, o.src, o.cfg, o.shw, o.shh, w, h, &only);
+            if (r > 0 && passes > 0)
+            {
+                box_blur(pv.r, pv.tmp, w, h, r, passes);
+                box_blur(pv.g, pv.tmp, w, h, r, passes);
+                box_blur(pv.b, pv.tmp, w, h, r, passes);
+            }
+            if (radii.size() > 1)
+            {
+                std::vector<float>* ch[3] = { &pv.r, &pv.g, &pv.b };
+                for (int c = 0; c < 3; ++c)
+                {
+                    if (sum[c].empty()) sum[c].assign(npx, 0.0f);
+                    for (size_t i = 0; i < npx; ++i) sum[c][i] += (*ch[c])[i];
+                }
+            }
+        }
+        if (radii.size() > 1) { pv.r.swap(sum[0]); pv.g.swap(sum[1]); pv.b.swap(sum[2]); }
+
+        // Ghost Overrides streaks, through the ghosts that ask for one.
+        std::vector<flaresim::StreakGhost> streaks;
+        for (size_t pi = 0; pi < pv.pairs.size(); ++pi)
+        {
+            const PairStyle& st = styles[pi];
+            if (!st.on || st.gain <= 0.0f || !st.over || st.over->streak <= 0.0f) continue;
+            flaresim::StreakGhost sg;
+            sg.pair  = pv.pairs[pi];
+            sg.boost = pv.boosts[pi] * st.gain * (highlighted(pv, pv.pairs[pi]) ? 1.0f : kDimmed);
+            for (int c = 0; c < 3; ++c) { sg.col[c] = st.col[c]; sg.tint[c] = st.over->streak_col[c]; }
+            sg.sx = st.scale;  sg.sy = st.scale_y;
+            sg.ox = st.ox * w; sg.oy = st.oy * w;
+            sg.gain = st.over->streak;
+            sg.length = st.over->streak_length;
+            sg.thickness = st.over->streak_thickness;
+            sg.edge = st.over->streak_edge;
+            streaks.push_back(sg);
+        }
+        if (!streaks.empty())
+        {
+            flaresim::StreakFrame sf;
+            sf.sensor_half_w = o.shw;  sf.sensor_half_h = o.shh;
+            sf.fmt_w = w;  sf.fmt_h = h;
+            sf.diag = diag;
+            flaresim::FlareExtras fx;
+            // The preview draws each channel at its own wavelength, with no
+            // spectral mixing: its streaks are traced the same way.
+            GhostConfig scfg = o.cfg;
+            scfg.spectral_samples = 3;
+            scfg.spectral_jitter = 0;
+            fx.set_ghost_streaks(flaresim::trace_ghost_streaks(pv.lens, streaks, { o.src }, scfg, sf));
+            std::vector<float>* ch[3] = { &pv.r, &pv.g, &pv.b };
+            for (int y = 0; y < h; ++y)
+                for (int c = 0; c < 3; ++c)
+                    fx.add_ghost_streak_row(c, y, 0, w, ch[c]->data() + (size_t)y * w);
         }
     }
 

@@ -2,16 +2,28 @@
 
 Major updates and bug fixes for FlareSim+, newest first. Version numbers match the release zips made with `scripts/package_release.sh --version <x.y.z>`, and each release has a git tag (`v1.0.0`, `v1.1.0`, ...) on the commit it was built from. Pull request numbers link to the full details.
 
-## Unreleased
+## 1.6.0-beta1 (2026-10-25)
+
+A side-by-side beta: nodes FlareSimPlusBeta / FlareSimPlusBeta3D and menus under "FlareSim+ Beta", so it installs next to 1.5 without replacing it (see `docs/FACILITY_INSTALL.md`, section 6).
 
 ### Added
+- Side-by-side builds: `cmake -DFLARESIM_EDITION=Beta` (or `scripts/build_docker.sh --edition Beta` and `scripts/package_release.sh --edition Beta`) makes FlareSimPlusBeta nodes, FlareSimPlusBeta_*.py modules and a BETA badge on the panel header. Help > FlareSim+ Beta > Convert FlareSim Nodes also turns regular FlareSim+ nodes into beta ones. The regular build is unchanged.
+- Hawk looks re-tuned against the reference footage with the new controls below: soft starburst cores, haze and core colour, per-ghost streaks, the visible ovals placed and sized, the V-Lite 35 rainbow ring softened.
+- Haze Core Tint (haze colour near the light apart from its tail), Ring Streaks / Count / Width, Ring Jitter / Jitter Size (soft noise over the ring), and a 4th Ghost Overrides `streak=` value, Edge (higher = a flat bar with sharp edges and ends).
 - Ghost Overrides: change one ghost on its own (gain, tint, scale, offset, or turn it off) on top of its two surfaces' settings, so matching one ghost no longer moves every other ghost off the same surfaces. Pick the ghost in the Lens Browser's Lens Elements tab, or type it on the node's Surfaces tab (`3-12 gain=2.5 color=1,0.6,0.9`). Saved in looks; older versions ignore it.
 - Haze Shape and Haze Tint: haze that is bright near the light with a long faint tail (same total light), and a colour for the veil. Starburst Tint, Fringe (colour fringing, 0 to 2) and Softness. All under Show Advanced and saved in looks; a look saved before them puts them back to their defaults, and older versions ignore them.
+- Finer controls for matching anamorphic references (all saved in looks; older versions ignore them):
+  - Ghost Overrides `streak=`: a thin horizontal line through one ghost, carrying a share of its light, as an anamorphic lens draws through small focused ghosts. `streak_color=` tints it.
+  - Ghost Overrides `blur=`: one ghost's own Ghost Blur, for soft rims; and `scale=x,y` to scale a ghost across and up separately.
+  - Haze Aspect (oval haze), Starburst Reach (long thin spikes, small core).
+  - Rays (random rays fanning out from the light) and Ring (a soft rainbow ring or arc) under Starburst.
+  - The Lens Browser's Pick a Ghost panel has Scale Up, Blur, Streak and Streak Length.
 - Resolution Independent (off by default): the flare looks the same at any plate size, as it does at Reference Width (default 1920). Fixes placed lights' ghosts dimming at 4K and Auto Detect haze, starburst and dirt brightening at 4K. Offsets are then in Reference Width pixels. Saved in looks.
 - Six Hawk-style 2x anamorphic lenses with matching looks, tuned against Hawk test footage (no Vantage prescription is public): Hawk V-Lite style 35/55/110mm (long blue streak, small blue mirrored ghost) and Hawk APL style 30/50/100mm (pale streak, oval ghosts, starburst on the 50). Streak length, mirrored ghost, veil and colours measured from light-on minus light-off frames; irises set to the footage's stops. `lenses/anamorphic/Hawk_*.lens`, `looks/Hawk_*.json`. (#49)
 - `docs/FACILITY_INSTALL.md`: installing FlareSim+ for a whole facility, including split layouts with Python and plugin files in different folders. (#48)
 
 ### Fixed
+- Lens Browser: a `FLARESIM_PREVIEW_LIB` pointing at another install's preview library of a different version no longer blocks the one next to this install.
 - Anamorphic lenses: the flare landed at half the distance from the frame centre and ghosts stayed round, because the flare was laid out squeezed on a desqueezed plate. The squeeze is now worked out from the lens (or a `squeeze:` line in the .lens file) and the flare is laid out desqueezed, so it sits on the light and ghosts come out as wide ovals. Spherical lenses are unchanged. Not yet on the macOS Metal nodes. (#49)
 - Lens Browser preview was blank in split facility installs: it now finds the preview library, lenses and looks next to the loaded plugin too, or from `FLARESIM_PREVIEW_LIB`. (#48)
 

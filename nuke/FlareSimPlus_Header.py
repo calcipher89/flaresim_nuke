@@ -40,6 +40,9 @@ except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
 NODE_CLASSES = ('FlareSimPlus', 'FlareSimPlus3D')
+# '' for the regular build, 'Beta' for a side-by-side edition build
+# (see scripts/make_edition.py); shown as a badge on the header.
+EDITION = NODE_CLASSES[0][len('FlareSim' 'Plus'):]
 HEADER_VERSION = 1
 HEADER_DIR = os.path.join(os.path.expanduser('~'), '.nuke', 'FlareSim', 'headers')
 LOOK_THUMB_DIR = os.path.join(HEADER_DIR, 'looks')
@@ -208,6 +211,20 @@ def draw_header(info, scale=1, width=None):
         p.setFont(_font(24, QtGui.QFont.Bold))
         p.drawText(QtCore.QRectF(0, 6, w, 34), QtCore.Qt.AlignCenter, 'FlareSim+')
 
+    # Edition badge (e.g. BETA) in the top right corner.
+    if EDITION:
+        p.setFont(_font(10, QtGui.QFont.Bold))
+        text = EDITION.upper()
+        fm = p.fontMetrics()
+        tw = (fm.horizontalAdvance(text) if hasattr(fm, 'horizontalAdvance')
+              else fm.width(text)) + 12
+        badge = QtCore.QRectF(w - tw - 10, 10, tw, 16)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor('#d9822b'))
+        p.drawRoundedRect(badge, 3, 3)
+        p.setPen(QtGui.QColor('#1b1c1f'))
+        p.drawText(badge, QtCore.Qt.AlignCenter, text)
+
     # Lens card.
     card = QtCore.QRectF(10, 56, w - 20, h - 62)
     p.setPen(QtGui.QPen(QtGui.QColor('#34353a'), 1))
@@ -273,7 +290,8 @@ def header_image(info, width=None):
             stamp = '%d:%d' % (int(st.st_mtime), st.st_size)
         except OSError:
             pass
-    key = json.dumps([HEADER_VERSION, info, stamp, width, SIZE[1]], sort_keys=True)
+    key = [HEADER_VERSION, info, stamp, width, SIZE[1]] + ([EDITION] if EDITION else [])
+    key = json.dumps(key, sort_keys=True)
     digest = hashlib.sha1(key.encode('utf-8')).hexdigest()
     path = os.path.join(HEADER_DIR, digest[:2], digest + '.png')
     if not os.path.isfile(path):
