@@ -334,7 +334,21 @@ def preview_library():
     # install keeps the compiled files in their own folder.
     dirs = [_HERE] + FlareSimPlus_Looks.plugin_dirs()
     candidates += [os.path.join(d, n) for d in dirs for n in names]
-    path = next((c for c in candidates if os.path.isfile(c)), None)
+    # The first one with this file's API version wins, so a FLARESIM_PREVIEW_LIB
+    # set for another FlareSim+ install (e.g. next to a beta) doesn't block
+    # the matching library next to this one.  If none match, the first found
+    # is used and reports its version below.
+    found = [c for c in candidates if os.path.isfile(c)]
+    path = found[0] if found else None
+    for c in found:
+        try:
+            probe = ctypes.CDLL(c)
+            probe.fsp_api_version.restype = ctypes.c_int
+            if probe.fsp_api_version() == FSP_API_VERSION:
+                path = c
+                break
+        except (OSError, AttributeError):
+            pass
     if not path:
         _lib_error = ('The live preview library (%s) was not found next to '
                       'FlareSimPlus_LensBrowser.py or the FlareSimPlus plugin '

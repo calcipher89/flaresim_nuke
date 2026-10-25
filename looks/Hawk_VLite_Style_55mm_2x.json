@@ -1,125 +1,141 @@
 {
-  "flaresim_look_version": 1,
-  "name": "Hawk V-Lite style 55mm 2x",
-  "description": "Hawk V-Lite style 2x anamorphic: long blue streak, small blue ghost mirrored below the light, soft glow. Tuned against reference footage of the real lens at f/2.8; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
-  "lens": "anamorphic/Hawk_VLite_Style_55mm_2x.lens",
-  "knobs": {
-    "flare_gain": 10.0,
-    "aperture_blades": 7,
-    "aperture_rotation": 0,
-    "spectral_samples": 3,
-    "spectral_jitter": true,
-    "ghost_blur": 0.0025,
-    "ghost_blur_passes": 3,
-    "haze_enable": true,
-    "haze_gain": 0.63,
-    "haze_radius": 0.15,
-    "starburst_enable": true,
-    "starburst_gain": 3000,
-    "starburst_scale": 0.3,
-    "surf_gain_0": 0.25,
-    "surf_color_0": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_1": 0.25,
-    "surf_color_1": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_2": 2.1709,
-    "surf_color_2": [
-      0.589,
-      0.809,
-      1.0
-    ],
-    "surf_gain_3": 2.1709,
-    "surf_color_3": [
-      0.589,
-      0.809,
-      1.0
-    ],
-    "surf_gain_4": 0.25,
-    "surf_color_4": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_5": 0.03,
-    "surf_color_5": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_6": 3.749,
-    "surf_color_6": [
-      0.619,
-      1.0,
-      0.851
-    ],
-    "surf_scale_6": 0.825,
-    "surf_gain_7": 0.25,
-    "surf_color_7": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_8": 0.1,
-    "surf_color_8": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_9": 0.25,
-    "surf_color_9": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_10": 0.25,
-    "surf_color_10": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_11": 0.25,
-    "surf_color_11": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_12": 0.25,
-    "surf_color_12": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_13": 0.25,
-    "surf_color_13": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_14": 3.749,
-    "surf_color_14": [
-      0.619,
-      1.0,
-      0.851
-    ],
-    "surf_scale_14": 0.825,
-    "surf_gain_15": 0.25,
-    "surf_color_15": [
-      1.0,
-      0.993,
-      0.983
-    ],
-    "surf_gain_16": 0.25,
-    "surf_color_16": [
-      1.0,
-      0.993,
-      0.983
-    ]
-  }
+ "flaresim_look_version": 1,
+ "name": "Hawk V-Lite style 55mm 2x",
+ "description": "Hawk V-Lite style 2x anamorphic: long blue streak, small blue ghost mirrored below the light, soft glow. Tuned against reference footage of the real lens at f/2.8; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint). v4: finer details matched to annotated references (thin streaks through small ghosts, per-ghost blur and stretch, oval haze). v4c: re-tuned ghosts calibrated to Nuke (gain/colour from Nuke box sums). v4s: haze near the light refitted (Haze Core Tint); compact blob (6-14).",
+ "lens": "anamorphic/Hawk_VLite_Style_55mm_2x.lens",
+ "knobs": {
+  "flare_gain": 10.0,
+  "aperture_blades": 7,
+  "aperture_rotation": 0,
+  "spectral_samples": 3,
+  "spectral_jitter": true,
+  "ghost_blur": 0.0012,
+  "ghost_blur_passes": 3,
+  "haze_enable": true,
+  "haze_gain": 0.8697,
+  "haze_radius": 0.2,
+  "starburst_enable": true,
+  "starburst_gain": 500,
+  "starburst_scale": 0.3,
+  "surf_gain_0": 0.25,
+  "surf_color_0": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_1": 0.25,
+  "surf_color_1": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_2": 1.8675,
+  "surf_color_2": [
+   0.589,
+   0.809,
+   1.0
+  ],
+  "surf_gain_3": 1.8675,
+  "surf_color_3": [
+   0.589,
+   0.809,
+   1.0
+  ],
+  "surf_gain_4": 0.25,
+  "surf_color_4": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_5": 0.03,
+  "surf_color_5": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_6": 3.436,
+  "surf_color_6": [
+   0.619,
+   1.0,
+   0.851
+  ],
+  "surf_scale_6": 0.825,
+  "surf_gain_7": 0.25,
+  "surf_color_7": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_8": 0.1,
+  "surf_color_8": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_9": 0.25,
+  "surf_color_9": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_10": 0.25,
+  "surf_color_10": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_11": 0.25,
+  "surf_color_11": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_12": 0.25,
+  "surf_color_12": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_13": 0.25,
+  "surf_color_13": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_14": 3.436,
+  "surf_color_14": [
+   0.619,
+   1.0,
+   0.851
+  ],
+  "surf_scale_14": 0.825,
+  "surf_gain_15": 0.25,
+  "surf_color_15": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "surf_gain_16": 0.25,
+  "surf_color_16": [
+   1.0,
+   0.993,
+   0.983
+  ],
+  "haze_shape": 0.998,
+  "haze_tint": [
+   0.92,
+   0.71,
+   1.13
+  ],
+  "ghost_overrides": "2-3 gain=0.9 color=1.8,1.45,1.0 offset=0,-7.6\n3-10 gain=18443 color=1.0000,0.4106,0.1856 scale=1.489,0.3647 offset=-103.7,-93.6 blur=0.006\n3-12 gain=1.0001 color=0.9107,0.8982,1.0000 scale=0.05,0.05 offset=-0.5,-182.3 streak=18,0.06,0.002,6 streak_color=0.05,0.95,0.75\n4-10 gain=15682 color=1.0000,0.9661,0.1332 scale=0.9554,6.601 offset=-960.5,1181.6 blur=0.04\n5-8 gain=19034 color=1.0000,0.5332,0.5303 scale=0.2348,1.142 offset=975.2,-48.4 blur=0.04\n6-14 gain=0.37661 color=1.0000,0.6432,0.8343 scale=0.16,0.45 offset=-32.1,-147.0 blur=0.003631\n12-14 offset=0,-11 streak=2.64,0.17,0.002,4 streak_color=0.1,0.35,1",
+  "haze_aspect": 1.5,
+  "res_independent": true,
+  "res_ref_width": 1920.0,
+  "haze_core_tint": [
+   1.451,
+   1.727,
+   0.721
+  ],
+  "starburst_softness": 0.02
+ }
 }

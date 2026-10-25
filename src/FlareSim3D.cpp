@@ -31,6 +31,7 @@
 #include "DDImage/Matrix4.h"
 #include "DDImage/Vector4.h"
 
+#include "edition.h"
 #include "lens.h"
 #include "lens_path.h"
 #include "occlusion.h"
@@ -395,7 +396,7 @@ public:
             snprintf(surf_labels_[k], sizeof(surf_labels_[k]), "Surf %d", k);
     }
 
-    const char* Class()     const override { return "FlareSimPlus3D"; }
+    const char* Class()     const override { return FSP_CLASS_3D; }
     const char* node_help() const override
     {
         return "Physically-based lens flare simulation — 3D source mode.\n\n"
@@ -546,8 +547,8 @@ public:
         // settable from Python or the knob's expression.
         SetFlags(f, Knob::HIDDEN);
         Tooltip(f, "Path to a .lens prescription file.  Set by the Lens Browser.");
-        PyScript_knob(f, "import FlareSimPlus_LensBrowser\n"
-                         "FlareSimPlus_LensBrowser.show_for_node(nuke.thisNode())",
+        PyScript_knob(f, "import " FSP_MODULE("LensBrowser") "\n"
+                         FSP_MODULE("LensBrowser") ".show_for_node(nuke.thisNode())",
                       "lens_browser", "Lens Browser");
         Tooltip(f, "Open the Lens Browser window for this node: browse and "
                    "filter lenses with a live flare preview, start from a look, "
@@ -878,7 +879,7 @@ public:
 
         // ---- About tab ----
         Tab_knob(f, "About");
-        Text_knob(f, "FlareSim+ 3D\n"
+        Text_knob(f, FSP_LABEL " 3D\n"
                      "\n"
                      "Physically-based lens flare simulation for Nuke — 3D source mode.\n"
                      "\n"
@@ -1770,6 +1771,6 @@ public:
 static Iop* build(Node* node) { return new FlareSim3D(node); }
 
 const Iop::Description FlareSim3D::d(
-    "FlareSimPlus3D",
-    "Filter/FlareSim+ 3D",
+    FSP_CLASS_3D,
+    "Filter/" FSP_LABEL " 3D",
     build);

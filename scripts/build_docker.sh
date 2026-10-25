@@ -10,6 +10,7 @@
 #   scripts/build_docker.sh                          # build plugins for Nuke 14–17
 #   scripts/build_docker.sh --versions "16"
 #   scripts/build_docker.sh --nuke-root /opt
+#   scripts/build_docker.sh --versions "15" --edition Beta   # side-by-side FlareSimPlusBeta build
 #
 # Images (docker/Dockerfile = ASWF base + minimal CUDA nvcc):
 #   flaresim-build:nuke14  aswf/ci-vfxall:2022  GCC 9  + CUDA 12.4
@@ -18,12 +19,14 @@
 #   flaresim-build:nuke17  aswf/ci-vfxall:2025  GCC 11 + CUDA 12.8
 #
 # Output: dist/nuke<major>/FlareSimPlus.so, FlareSimPlus3D.so and flaresim_preview.so
+#   (with --edition Beta: dist/nuke<major>-beta/FlareSimPlusBeta.so, FlareSimPlusBeta3D.so, ...)
 
 set -euo pipefail
 
 VERSIONS="14 15 16 17"
 NUKE_ROOT="/usr/local"
 BUILD_IMAGES=false
+EDITION=""
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${REPO_DIR}/dist"
 
@@ -33,9 +36,15 @@ while [[ $# -gt 0 ]]; do
         --versions)  VERSIONS="$2";  shift 2 ;;
         --nuke-root) NUKE_ROOT="$2"; shift 2 ;;
         --dist-dir)  DIST_DIR="$2";  shift 2 ;;
-        *) echo "Usage: $0 [--images] [--versions \"14 15 16 17\"] [--nuke-root /usr/local] [--dist-dir ./dist]" >&2; exit 1 ;;
+        --edition)   EDITION="$2";   shift 2 ;;
+        *) echo "Usage: $0 [--images] [--versions \"14 15 16 17\"] [--nuke-root /usr/local] [--dist-dir ./dist] [--edition Beta]" >&2; exit 1 ;;
     esac
 done
+if [[ -n "${EDITION}" && ! "${EDITION}" =~ ^[A-Z][A-Za-z0-9]*$ ]]; then
+    echo "Error: --edition must be a capitalised word such as Beta" >&2; exit 1
+fi
+SUFFIX="${EDITION:+-${EDITION,,}}"     # "" or e.g. "-beta"
+PLUGIN="FlareSimPlus${EDITION}"
 
 declare -A BASE_IMAGE=(
     [14]="aswf/ci-vfxall:2022"
@@ -81,19 +90,20 @@ for V in $VERSIONS; do
                 NVCC=\$(ls -d /usr/local/cuda-*/bin/nvcc 2>/dev/null | sort -V | tail -1)
                 export PATH=\"\$(dirname \"\${NVCC}\"):\${PATH}\"
                 nvcc --version | tail -1
-                cmake -S /src -B /src/build/docker-nuke${V} \
+                cmake -S /src -B /src/build/docker-nuke${V}${SUFFIX} \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DFLARESIM_BUILD_TESTS=OFF \
                     -DNUKE_VERSION=${NUKE_VERSION} \
                     -DNDK_ROOT=/nuke/include \
-                    -DNUKE_LIB_DIR=/nuke
-                cmake --build /src/build/docker-nuke${V} -j\$(nproc)
+                    -DNUKE_LIB_DIR=/nuke \
+                    -DFLARESIM_EDITION=${EDITION}
+                cmake --build /src/build/docker-nuke${V}${SUFFIX} -j\$(nproc)
             "; then
-        mkdir -p "${DIST_DIR}/nuke${V}"
-        cp "${REPO_DIR}/build/docker-nuke${V}/FlareSimPlus.so" \
-           "${REPO_DIR}/build/docker-nuke${V}/FlareSimPlus3D.so" \
-           "${REPO_DIR}/build/docker-nuke${V}/flaresim_preview.so" "${DIST_DIR}/nuke${V}/"
-        echo "  OK -> ${DIST_DIR}/nuke${V}"
+        OUT="${DIST_DIR}/nuke${V}${SUFFIX}"
+        BUILT="${REPO_DIR}/build/docker-nuke${V}${SUFFIX}"
+        mkdir -p "${OUT}"
+        cp "${BUILT}/${PLUGIN}.so" "${BUILT}/${PLUGIN}3D.so" "${BUILT}/flaresim_preview.so" "${OUT}/"
+        echo "  OK -> ${OUT}"
         succeeded+=("${V}")
     else
         echo "  Build FAILED"

@@ -1,7 +1,7 @@
 {
   "flaresim_look_version": 1,
   "name": "Hawk V-Lite style 35mm 2x",
-  "description": "Hawk V-Lite style 2x anamorphic: long saturated blue streak, soft glow. Tuned against reference footage of the real lens at f/2.2; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint).",
+  "description": "Hawk V-Lite style 2x anamorphic: long saturated blue streak, soft glow. Tuned against reference footage of the real lens at f/2.2; not a Vantage prescription. Colours assume a white light (use Colour From Plate or Light Colour for the light's own tint). v4: finer details matched to annotated references (thin streaks through small ghosts, per-ghost blur and stretch, oval haze, rays and a faint rainbow ring). v4c: re-tuned ghosts calibrated to Nuke (gain/colour from Nuke box sums). v4s: haze near the light refitted (Haze Core Tint); compact bright blob added in the ellipse (4-14). v4t: thin streaky rainbow ring (Ring Streaks), smaller oval 6-12.",
   "lens": "anamorphic/Hawk_VLite_Style_35mm_2x.lens",
   "knobs": {
     "flare_gain": 10.0,
@@ -9,13 +9,13 @@
     "aperture_rotation": 0,
     "spectral_samples": 3,
     "spectral_jitter": true,
-    "ghost_blur": 0.0025,
+    "ghost_blur": 0.0012,
     "ghost_blur_passes": 3,
     "haze_enable": true,
-    "haze_gain": 0.63,
-    "haze_radius": 0.15,
+    "haze_gain": 0.8446,
+    "haze_radius": 0.2,
     "starburst_enable": true,
-    "starburst_gain": 4000,
+    "starburst_gain": 450,
     "starburst_scale": 0.3,
     "surf_gain_0": 0.25,
     "surf_color_0": [
@@ -29,13 +29,13 @@
       1.0,
       0.998
     ],
-    "surf_gain_2": 3.038,
+    "surf_gain_2": 2.631,
     "surf_color_2": [
       0.48,
       0.77,
       1.0
     ],
-    "surf_gain_3": 3.038,
+    "surf_gain_3": 2.631,
     "surf_color_3": [
       0.48,
       0.77,
@@ -67,9 +67,9 @@
     ],
     "surf_gain_8": 0.25,
     "surf_color_8": [
-      1,
-      1,
-      1
+      0.9997337517132964,
+      1.0,
+      0.9984141742637289
     ],
     "surf_gain_9": 0.25,
     "surf_color_9": [
@@ -91,9 +91,9 @@
     ],
     "surf_gain_12": 0.25,
     "surf_color_12": [
-      1,
-      1,
-      1
+      0.9997337517132964,
+      1.0,
+      0.9984141742637289
     ],
     "surf_gain_13": 0.25,
     "surf_color_13": [
@@ -142,6 +142,46 @@
       1.0,
       1.0,
       0.998
-    ]
+    ],
+    "haze_shape": 0.999,
+    "haze_tint": [
+      1.0,
+      0.928,
+      0.868
+    ],
+    "ghost_overrides": "2-3 gain=0.882 color=0.12,0.52,1.0\n4-5 gain=170.83 color=0.9071,1.0000,0.4853 scale=0.09369,0.125 offset=-205.6,332.5 blur=0.005\n4-13 gain=243.75 color=0.9551,1.0000,0.5469 scale=0.1292,0.2175 offset=-246.8,391.2 blur=0.005\n4-14 scale=0.008088,0.02185 offset=-12.9,-130.1 blur=0.0009079 gain=39.045 color=0.9947,1.0000,0.8363\n4-16 gain=4567 color=0.9045,1.0000,0.6001 scale=0.5233,1.385 offset=961.4,188.6 blur=0.02\n4-18 gain=92.044 color=0.9116,1.0000,0.5239 scale=0.1124,0.1587 offset=-111.3,253.9 blur=0.005\n4-20 gain=375.64 color=0.8825,1.0000,0.9039 scale=0.02332,0.2315 offset=3.9,-20.8 blur=0.002\n6-7 gain=4099.1 color=0.9583,1.0000,0.6034 scale=0.2191,0.6247 offset=-955.0,69.9 blur=0.02\n6-9 gain=13065 color=1.0000,0.8307,0.6634 scale=0.2073,1.27 offset=972.7,43.6 blur=0.04\n6-12 gain=1773.7 color=1.000,0.961,0.662 scale=0.447 offset=-7.9,-100.1\n9-17 gain=1.7945e+05 color=0.8474,1.0000,0.2730 scale=0.1463,0.9539 offset=-990.9,-2.6 blur=0.04\n10-15 gain=343.27 color=0.6422,1.0000,0.2002 scale=0.05309,0.07813 offset=-180.1,308.3 blur=0.005\n10-17 gain=306.18 color=0.6376,1.0000,0.1996 scale=0.1406,0.2148 offset=-136.0,242.8 blur=0.005\n15-17 gain=254.12 color=1.0000,0.6092,0.1493 scale=0.05065,0.07393 offset=-225.5,356.3 blur=0.005\n17-19 gain=700.38 color=0.8001,1.0000,0.1315 scale=0.1668,0.2443 offset=-158.5,268.7 blur=0.005\n1-2 gain=55 color=0.9,0.45,0.2 scale=3,3 offset=-20,-204 blur=0.004",
+    "ring_gain": 2.8,
+    "ring_radius": 0.151,
+    "ring_aspect": 1.4,
+    "ring_width": 0.035,
+    "ring_rainbow": 0.33,
+    "ring_arc": 170.0,
+    "ring_angle": -90.0,
+    "rays_gain": 1.5,
+    "rays_count": 48,
+    "rays_length": 0.3,
+    "rays_width": 0.3,
+    "rays_spread": 150.0,
+    "rays_angle": -90.0,
+    "haze_aspect": 2.0,
+    "ring_tint": [
+      1.0,
+      0.6,
+      0.38
+    ],
+    "res_independent": true,
+    "res_ref_width": 1920.0,
+    "haze_core_tint": [
+      0.993,
+      1.058,
+      0.895
+    ],
+    "ring_streaks": 0.3,
+    "ring_streak_count": 500,
+    "ring_streak_width": 0.15,
+    "starburst_softness": 0.03,
+    "starburst_fringe": 0.0,
+    "ring_jitter": 1.0,
+    "ring_jitter_size": 0.15
   }
 }

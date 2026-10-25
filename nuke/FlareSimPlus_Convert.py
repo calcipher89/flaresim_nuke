@@ -31,6 +31,14 @@ import sys
 
 CLASS_MAP = {'FlareSim': 'FlareSimPlus', 'FlareSim3D': 'FlareSimPlus3D'}
 
+# A side-by-side edition build (cmake -DFLARESIM_EDITION=Beta, classes with
+# the edition in their names) also takes nodes from the regular build.  It is
+# spelt 'FlareSim' 'Plus' in two halves so scripts/make_edition.py keeps it.
+_PLUS = 'FlareSim' 'Plus'
+if CLASS_MAP['FlareSim'] != _PLUS:
+    CLASS_MAP[_PLUS] = CLASS_MAP['FlareSim']
+    CLASS_MAP[_PLUS + '3D'] = CLASS_MAP['FlareSim3D']
+
 # Knobs that belong to the node in the graph, not its settings.
 _SKIP_KNOBS = {'name', 'xpos', 'ypos', 'selected', 'inputs', 'help', 'onCreate',
                'onDestroy', 'knobChanged', 'updateUI', 'autolabel', 'panel',
@@ -43,7 +51,8 @@ _SKIP_KNOBS = {'name', 'xpos', 'ypos', 'selected', 'inputs', 'help', 'onCreate',
 # ---------------------------------------------------------------------------
 
 # A node starts with its class name at the start of a line, then " {".
-_NODE_RE = re.compile(r'^(\s*)(FlareSim3D|FlareSim)(\s*\{)', re.MULTILINE)
+_NODE_RE = re.compile(r'^(\s*)(%s)(\s*\{)' % '|'.join(
+    sorted(CLASS_MAP, key=len, reverse=True)), re.MULTILINE)
 
 
 def convert_text(text):

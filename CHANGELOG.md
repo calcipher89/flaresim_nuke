@@ -2,9 +2,14 @@
 
 Major updates and bug fixes for FlareSim+, newest first. Version numbers match the release zips made with `scripts/package_release.sh --version <x.y.z>`, and each release has a git tag (`v1.0.0`, `v1.1.0`, ...) on the commit it was built from. Pull request numbers link to the full details.
 
-## Unreleased
+## 1.6.0-beta1 (2026-10-25)
+
+A side-by-side beta: nodes FlareSimPlusBeta / FlareSimPlusBeta3D and menus under "FlareSim+ Beta", so it installs next to 1.5 without replacing it (see `docs/FACILITY_INSTALL.md`, section 6).
 
 ### Added
+- Side-by-side builds: `cmake -DFLARESIM_EDITION=Beta` (or `scripts/build_docker.sh --edition Beta` and `scripts/package_release.sh --edition Beta`) makes FlareSimPlusBeta nodes, FlareSimPlusBeta_*.py modules and a BETA badge on the panel header. Help > FlareSim+ Beta > Convert FlareSim Nodes also turns regular FlareSim+ nodes into beta ones. The regular build is unchanged.
+- Hawk looks re-tuned against the reference footage with the new controls below: soft starburst cores, haze and core colour, per-ghost streaks, the visible ovals placed and sized, the V-Lite 35 rainbow ring softened.
+- Haze Core Tint (haze colour near the light apart from its tail), Ring Streaks / Count / Width, Ring Jitter / Jitter Size (soft noise over the ring), and a 4th Ghost Overrides `streak=` value, Edge (higher = a flat bar with sharp edges and ends).
 - Ghost Overrides: change one ghost on its own (gain, tint, scale, offset, or turn it off) on top of its two surfaces' settings, so matching one ghost no longer moves every other ghost off the same surfaces. Pick the ghost in the Lens Browser's Lens Elements tab, or type it on the node's Surfaces tab (`3-12 gain=2.5 color=1,0.6,0.9`). Saved in looks; older versions ignore it.
 - Haze Shape and Haze Tint: haze that is bright near the light with a long faint tail (same total light), and a colour for the veil. Starburst Tint, Fringe (colour fringing, 0 to 2) and Softness. All under Show Advanced and saved in looks; a look saved before them puts them back to their defaults, and older versions ignore them.
 - Finer controls for matching anamorphic references (all saved in looks; older versions ignore them):
@@ -18,6 +23,7 @@ Major updates and bug fixes for FlareSim+, newest first. Version numbers match t
 - `docs/FACILITY_INSTALL.md`: installing FlareSim+ for a whole facility, including split layouts with Python and plugin files in different folders. (#48)
 
 ### Fixed
+- Lens Browser: a `FLARESIM_PREVIEW_LIB` pointing at another install's preview library of a different version no longer blocks the one next to this install.
 - Anamorphic lenses: the flare landed at half the distance from the frame centre and ghosts stayed round, because the flare was laid out squeezed on a desqueezed plate. The squeeze is now worked out from the lens (or a `squeeze:` line in the .lens file) and the flare is laid out desqueezed, so it sits on the light and ghosts come out as wide ovals. Spherical lenses are unchanged. Not yet on the macOS Metal nodes. (#49)
 - Lens Browser preview was blank in split facility installs: it now finds the preview library, lenses and looks next to the loaded plugin too, or from `FLARESIM_PREVIEW_LIB`. (#48)
 
