@@ -38,6 +38,7 @@ struct ExtrasDetailKnobs
     float ring_streaks      = 0.0f;
     int   ring_streak_count = 120;
     float ring_streak_width = 0.4f;
+    float ring_jitter       = 0.0f;
 
     // Knobs that follow the Haze and Starburst checkboxes.
     static const char* const* haze_names()
@@ -51,7 +52,7 @@ struct ExtrasDetailKnobs
             "starburst_reach", "rays_gain", "rays_count", "rays_length", "rays_width",
             "rays_spread", "rays_angle", "rays_seed", "rays_tint", "ring_gain", "ring_radius",
             "ring_aspect", "ring_width", "ring_rainbow", "ring_arc", "ring_angle", "ring_tint",
-            "ring_streaks", "ring_streak_count", "ring_streak_width", nullptr };
+            "ring_streaks", "ring_streak_count", "ring_streak_width", "ring_jitter", nullptr };
         return n;
     }
 
@@ -149,6 +150,13 @@ struct ExtrasDetailKnobs
         adv.add(f, Float_knob(f, &ring_streak_width, "ring_streak_width", "Ring Streak Width"));
         SetRange(f, 0.05, 3.0);
         Tooltip(f, "Width of the streaks, in degrees round the ring.");
+        adv.add(f, Float_knob(f, &ring_jitter, "ring_jitter", "Ring Jitter"));
+        SetRange(f, 0.0, 3.0);
+        Tooltip(f, "Spectral noise: each colour of the ring moves in and out by its own "
+                   "random amount round the ring, so the rainbow's colours drift and break "
+                   "up instead of running as even bands.  In ring widths; about one patch "
+                   "per streak (Ring Streak Count).  0 = even bands.  Rays Seed picks "
+                   "another pattern.");
     }
 
     // starburst_on: the Starburst checkbox (Rays and Ring follow it).
@@ -174,6 +182,7 @@ struct ExtrasDetailKnobs
         xc.ring_streaks      = ring_streaks;
         xc.ring_streak_count = ring_streak_count;
         xc.ring_streak_width = ring_streak_width;
+        xc.ring_jitter       = ring_jitter;
         for (int c = 0; c < 3; ++c) { xc.rays_tint[c] = rays_tint[c]; xc.ring_tint[c] = ring_tint[c]; }
     }
 };

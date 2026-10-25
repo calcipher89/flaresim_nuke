@@ -330,6 +330,35 @@ int main(int argc, char** argv)
         check(hi > 4.0f * std::max(lo, 1e-6f), "Ring Streaks: breaks the ring up", hi / std::max(lo, 1e-6f));
         check(std::fabs(s1 / s0 - 1.0) < 0.15, "Ring Streaks: keeps the ring's light", s1 / s0);
         cfg.ring_streaks = 0.0f;
+
+        // Ring Jitter: the colours move in and out round the ring, so red over
+        // green at one radius changes along the ring; the light stays.
+        auto ratio_spread = [&](double& total) {
+            std::vector<float> r(w), g(w);
+            float lo = 1e9f, hi = 0.0f;
+            total = 0.0;
+            for (int y = 0; y < h; ++y) {
+                std::fill(g.begin(), g.end(), 0.0f); fx.add_starburst_row(1, y, 0, w, g.data());
+                for (float v : g) total += v;
+            }
+            r.assign(w, 0.0f); g.assign(w, 0.0f);
+            fx.add_starburst_row(0, yr, 0, w, r.data()); fx.add_starburst_row(1, yr, 0, w, g.data());
+            for (int x = w / 2 - ry; x < w / 2 + ry; ++x) {
+                if (g[x] < 0.2f * best_r) continue;
+                lo = std::min(lo, r[x] / g[x]); hi = std::max(hi, r[x] / g[x]);
+            }
+            return hi / std::max(lo, 1e-6f);
+        };
+        fx.compute(cfg, fr, lights);
+        double j0 = 0.0, j1 = 0.0;
+        const float even = ratio_spread(j0);
+        cfg.ring_jitter = 1.0f;
+        cfg.ring_streak_count = 40;
+        fx.compute(cfg, fr, lights);
+        const float jit = ratio_spread(j1);
+        check(jit > 1.5f * even, "Ring Jitter: colours drift round the ring", jit / even);
+        check(std::fabs(j1 / j0 - 1.0) < 0.1, "Ring Jitter: keeps the ring's light", j1 / j0);
+        cfg.ring_jitter = 0.0f;
         cfg.ring_gain = 0.0f;
     }
 
